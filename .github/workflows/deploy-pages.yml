@@ -1,0 +1,89 @@
+name: Deploy GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-artifacts:
+    uses: ./.github/workflows/build.yml
+
+  build:
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download chiptunomatic-wasm artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: chiptunomatic-wasm
+          path: public/chiptunomatic-wasm
+
+      - name: Download CLI Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-linux
+          path: dist-cli
+
+      - name: Install ALSA runtime (required to execute the CLI binary)
+        run: sudo apt-get install -y libasound2 libasound2t64 2>/dev/null || true
+
+      - name: Collect CLI help text
+        id: cli-help
+        run: |
+          chmod +x dist-cli/chiptunomatic-x86_64-unknown-linux-gnu
+          HELP=$(dist-cli/chiptunomatic-x86_64-unknown-linux-gnu --help 2>&1 || true)
+          {
+            echo "text<<EOF"
+            echo "$HELP"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Debug CLI help output
+        run: echo "${{ steps.cli-help.outputs.text }}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build static export
+        run: npm run build:pages
+        env:
+          GITHUB_PAGES: "true"
+          NEXT_PUBLIC_GITHUB_REPO_URL: https://github.com/${{ github.repository }}
+          NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          NEXT_PUBLIC_CLI_HELP: ${{ steps.cli-help.outputs.text }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
