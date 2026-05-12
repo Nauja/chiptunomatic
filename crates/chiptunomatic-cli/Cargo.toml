@@ -1,0 +1,20 @@
+[package]
+name = "chiptunomatic-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "chiptunomatic"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+chiptunomatic = { path = "../chiptunomatic" }
+clap = { version = "4", features = ["derive"] }
+cli-log = "2.1.0"
+crossterm = "0.29"
+hound = "3"
+indicatif = "0.18.4"
+ratatui = { version = "0.30", features = ["crossterm", "unstable-rendered-line-info", "unstable-widget-ref"] }
+ratatui-explorer = "0.3"
+rodio = "0.19"
