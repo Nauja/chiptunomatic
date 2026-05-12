@@ -1,0 +1,13 @@
+wasm/
+public/chiptunomatic-wasm/
+.next/
+node_modules/
+out/
+.env.local
+target/
+*.log
+.claude/
+*.tsbuildinfo
+*.gif
+demo.yml
+*.wav

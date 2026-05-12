@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/chiptunomatic",
+    "crates/chiptunomatic-cli",
+    "crates/chiptunomatic-wasm",
+]
+default-members = ["crates/chiptunomatic", "crates/chiptunomatic-cli"]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
