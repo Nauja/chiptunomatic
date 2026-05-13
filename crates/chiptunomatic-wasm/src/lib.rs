@@ -3,11 +3,24 @@
 
 mod incremental;
 
-use chiptunomatic::{GenerateError, SongMetadata};
+use alloc::rc::Rc;
+use chiptunomatic::{
+    plugin::{Plugin, Random},
+    Chiptunomatic, GenerateError, RandomWrapper, SampleDrumSteps, SongMetadata,
+};
+use rand::rngs::StdRng;
 use wasm_bindgen::prelude::*;
+
+extern crate alloc;
 
 fn gen_err(e: GenerateError) -> JsValue {
     JsValue::from_str(&e.to_string())
+}
+
+fn chiptunomatic_with_mode(mode: &str) -> Chiptunomatic {
+    let mut c = Chiptunomatic::new().with_default_plugins();
+    let _ = c.set_mode(&mode.to_string());
+    c
 }
 
 // --- SongMetadata (matches `chiptunomatic` core; no filesystem) -------------------------------
@@ -17,7 +30,11 @@ fn gen_err(e: GenerateError) -> JsValue {
 #[wasm_bindgen(js_name = SongMetadataView)]
 pub struct SongMetadataView {
     #[wasm_bindgen(skip)]
-    inner: SongMetadata,
+    pub(crate) inner: SongMetadata,
+    #[wasm_bindgen(skip)]
+    pub(crate) plugin: Rc<dyn Plugin>,
+    #[wasm_bindgen(skip)]
+    pub(crate) mode_name: alloc::string::String,
 }
 
 #[wasm_bindgen]
@@ -54,7 +71,7 @@ impl SongMetadataView {
     }
 
     #[wasm_bindgen(getter, js_name = chordDescription)]
-    pub fn chord_description(&self) -> String {
+    pub fn chord_description(&self) -> alloc::string::String {
         self.inner.chord_description.clone()
     }
 
@@ -108,6 +125,12 @@ impl SongMetadataView {
         self.inner.drum_seed.to_vec()
     }
 
+    /// The selected music mode name (e.g. `"chiptune"`, `"lofi"`, …).
+    #[wasm_bindgen(getter)]
+    pub fn mode(&self) -> alloc::string::String {
+        self.mode_name.clone()
+    }
+
     /// `undefined` if no open-hat accent; otherwise the 16-step index (see core [`DrumPattern`]).
     #[wasm_bindgen(getter, js_name = openHatStep)]
     pub fn open_hat_step(&self) -> Option<u32> {
@@ -122,16 +145,79 @@ impl SongMetadataView {
     }
 }
 
+fn metadata_view_from(c: &Chiptunomatic, inner: SongMetadata) -> SongMetadataView {
+    SongMetadataView {
+        inner,
+        plugin: c.plugin(),
+        mode_name: c.mode().to_string(),
+    }
+}
+
 /// Same as [`SongMetadata::from_string`]: UTF-8 `name` bytes plus stream length used for timing / beats.
 #[wasm_bindgen(js_name = createSongMetadataFromString)]
 pub fn create_song_metadata_from_string(
     name: &str,
     data_byte_len: u64,
 ) -> Result<SongMetadataView, JsValue> {
-    SongMetadata::from_string(name, data_byte_len)
-        .map(|inner| SongMetadataView { inner })
+    let c = Chiptunomatic::new();
+    c.song_metadata_from_string(name, data_byte_len)
+        .map(|inner| metadata_view_from(&c, inner))
         .map_err(gen_err)
 }
+
+/// Same as [`create_song_metadata_from_string`] but selects a music mode by name.
+/// `mode`: one of the names returned by [`music_mode_names`] (e.g. `"chiptune"`, `"lofi"`, …).
+#[wasm_bindgen(js_name = createSongMetadataFromStringWithMode)]
+pub fn create_song_metadata_from_string_with_mode(
+    name: &str,
+    data_byte_len: u64,
+    mode: &str,
+) -> Result<SongMetadataView, JsValue> {
+    let c = chiptunomatic_with_mode(mode);
+    c.song_metadata_from_string(name, data_byte_len)
+        .map(|inner| metadata_view_from(&c, inner))
+        .map_err(gen_err)
+}
+
+/// Returns a comma-separated list of all available mode names.
+#[wasm_bindgen(js_name = musicModeNames)]
+pub fn music_mode_names() -> alloc::string::String {
+    Chiptunomatic::new()
+        .with_default_plugins()
+        .modes()
+        .join(",")
+}
+
+// --- DrumSampleGenerator -----------------------------------------------------------------
+
+/// Drum sample generator backed by the Rust plugin — replaces the JS `drum-synth.ts` port.
+/// Call [`next_sample`] once per output audio sample to interleave drum audio with the song.
+#[wasm_bindgen(js_name = DrumSampleGenerator)]
+pub struct WasmDrumSampleGenerator {
+    inner: SampleDrumSteps,
+}
+
+#[wasm_bindgen]
+impl WasmDrumSampleGenerator {
+    /// Build a generator that uses the same plugin and drum pattern as the given metadata view.
+    #[wasm_bindgen(js_name = withMetadata)]
+    pub fn with_metadata(metadata: &SongMetadataView, sample_rate_hz: u32) -> WasmDrumSampleGenerator {
+        let inner_metadata = metadata.clone_inner_metadata();
+        let rng_seed = inner_metadata.rng_seed;
+        let random: Rc<dyn Random> = Rc::new(RandomWrapper::<StdRng>::from_seed(rng_seed));
+        let inner = SampleDrumSteps::new(inner_metadata, metadata.plugin.clone(), random)
+            .with_sample_rate(sample_rate_hz);
+        WasmDrumSampleGenerator { inner }
+    }
+
+    /// Advance by one output sample and return its value.
+    #[wasm_bindgen(js_name = nextSample)]
+    pub fn next_sample(&mut self) -> f32 {
+        self.inner.next().unwrap_or(0.0)
+    }
+}
+
+// --- SongMetadata factories --------------------------------------------------------------
 
 /// Same as [`SongMetadata::from_seed`]: arbitrary seed bytes (hashed) plus stream length.
 #[wasm_bindgen(js_name = createSongMetadataFromSeed)]
@@ -139,7 +225,8 @@ pub fn create_song_metadata_from_seed(
     seed: &[u8],
     data_byte_len: u64,
 ) -> Result<SongMetadataView, JsValue> {
-    SongMetadata::from_seed(seed, data_byte_len)
-        .map(|inner| SongMetadataView { inner })
+    let c = Chiptunomatic::new();
+    c.song_metadata_from_seed(seed, data_byte_len)
+        .map(|inner| metadata_view_from(&c, inner))
         .map_err(gen_err)
 }

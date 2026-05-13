@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 [dependencies]
 chiptunomatic = { path = "../chiptunomatic", default-features = false, features = ["js", "std"] }
 wasm-bindgen = "0.2.120"
+rand = { version = "0.8", default-features = false, features = ["std_rng"] }

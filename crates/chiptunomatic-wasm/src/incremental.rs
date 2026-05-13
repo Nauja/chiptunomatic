@@ -3,8 +3,8 @@
 
 use chiptunomatic::{
     constants::{MAX_PLAN_CHUNK_NOTES, SAMPLE_RATE},
-    BassNote, MelodyNote, Mix, MixGenerator, Sample, SongNote, SongNoteReader, SongSample,
-    SongSampleGenerator, StemSample,
+    BassNote, MelodyNote, Mix, MixGenerator, ReadSongNote, Sample, SongNote, SongNoteReader,
+    SongSample, SongSampleGenerator, StemOutput, StemSample,
 };
 use wasm_bindgen::prelude::*;
 
@@ -82,6 +82,10 @@ pub struct SampleWasm {
     pub triangle_value: f32,
     #[wasm_bindgen(js_name = triangleByteIndex)]
     pub triangle_byte_index: u64,
+    #[wasm_bindgen(js_name = voiceValue)]
+    pub voice_value: f32,
+    #[wasm_bindgen(js_name = voiceByteIndex)]
+    pub voice_byte_index: u64,
     pub drum: f32,
 }
 
@@ -92,6 +96,8 @@ impl From<SongSample> for SampleWasm {
             square_byte_index: s.square.byte_index,
             triangle_value: s.triangle.value,
             triangle_byte_index: s.triangle.byte_index,
+            voice_value: s.voice.value,
+            voice_byte_index: s.voice.byte_index,
             drum: 0.0,
         }
     }
@@ -108,6 +114,10 @@ impl SampleWasm {
                 triangle: StemSample {
                     value: self.triangle_value,
                     byte_index: self.triangle_byte_index,
+                },
+                voice: StemSample {
+                    value: self.voice_value,
+                    byte_index: self.voice_byte_index,
                 },
             },
             drum: self.drum,
@@ -177,7 +187,7 @@ impl WasmSongNoteReader {
     #[wasm_bindgen(js_name = withMetadata)]
     pub fn with_metadata(metadata: &SongMetadataView) -> WasmSongNoteReader {
         WasmSongNoteReader {
-            inner: SongNoteReader::new(metadata.clone_inner_metadata()),
+            inner: SongNoteReader::new(metadata.clone_inner_metadata(), metadata.plugin.clone()),
         }
     }
 
@@ -212,9 +222,12 @@ pub struct WasmSampleGenerator(SongSampleGenerator);
 
 #[wasm_bindgen]
 impl WasmSampleGenerator {
-    #[wasm_bindgen(constructor)]
-    pub fn new(sample_rate_hz: u32) -> WasmSampleGenerator {
-        WasmSampleGenerator(SongSampleGenerator::new().with_sample_rate(sample_rate_hz))
+    /// Build a sample generator that uses the same plugin as the given [`SongMetadataView`].
+    #[wasm_bindgen(js_name = withMetadata)]
+    pub fn with_metadata(metadata: &SongMetadataView, sample_rate_hz: u32) -> WasmSampleGenerator {
+        WasmSampleGenerator(
+            SongSampleGenerator::new(metadata.plugin.clone()).with_sample_rate(sample_rate_hz),
+        )
     }
 
     /// Same as [`SongSampleGenerator::sample_note`] for one [`SongNote`] (`PlanNoteWasm` envelope).
@@ -253,6 +266,46 @@ impl WasmIterMix {
     #[wasm_bindgen(js_name = generateMix)]
     pub fn generate_mix(&mut self, sample: &SampleWasm) -> MixWasm {
         MixWasm::from_mix(self.inner.mix_sample(sample.to_core()))
+    }
+
+    // --- master ---
+
+    #[wasm_bindgen(js_name = setMasterVolume)]
+    pub fn set_master_volume(&mut self, volume: f32) {
+        self.inner.master_output.volume = volume;
+    }
+
+    #[wasm_bindgen(js_name = setMasterMuted)]
+    pub fn set_master_muted(&mut self, muted: bool) {
+        self.inner.master_output.muted = muted;
+    }
+
+    // --- voice ---
+
+    #[wasm_bindgen(js_name = setVoiceOutput)]
+    pub fn set_voice_output(&mut self, volume: f32, muted: bool, solo: bool) {
+        self.inner.voice_output = StemOutput { volume, muted, solo };
+    }
+
+    // --- square (melody) ---
+
+    #[wasm_bindgen(js_name = setSquareOutput)]
+    pub fn set_square_output(&mut self, volume: f32, muted: bool, solo: bool) {
+        self.inner.square_output = StemOutput { volume, muted, solo };
+    }
+
+    // --- triangle (bass) ---
+
+    #[wasm_bindgen(js_name = setTriangleOutput)]
+    pub fn set_triangle_output(&mut self, volume: f32, muted: bool, solo: bool) {
+        self.inner.triangle_output = StemOutput { volume, muted, solo };
+    }
+
+    // --- noise (drums) ---
+
+    #[wasm_bindgen(js_name = setNoiseOutput)]
+    pub fn set_noise_output(&mut self, volume: f32, muted: bool, solo: bool) {
+        self.inner.noise_output = StemOutput { volume, muted, solo };
     }
 }
 

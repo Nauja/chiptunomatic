@@ -3,15 +3,17 @@
 import {
   streamPcmChunksFromIncrementalPlan,
 } from './wav-mono-i16';
-import { DrumSampleGenerator } from './drum-synth';
 import { songInfoFromMetadataView } from './chiptunomatic-metadata';
 import type {
   ChiptuneSongInfo,
   ChiptunomaticWasmModule,
+  DrumSampleGeneratorHandle,
   SongMetadataJs,
 } from './chiptunomatic-types';
 import type {
+  MainWorkerMessage,
   MainGenerateMessage,
+  MainGetModesMessage,
   WorkerGenerateReply,
 } from './chiptunomatic-worker-messages';
 
@@ -42,13 +44,25 @@ function post(reply: WorkerGenerateReply, transfer: Transferable[] = []) {
   (self as DedicatedWorkerGlobalScope).postMessage(reply, transfer);
 }
 
-self.onmessage = async (evt: MessageEvent<MainGenerateMessage>) => {
+async function handleGetModes(msg: MainGetModesMessage) {
+  try {
+    const glue = await loadGlue(msg.wasmScriptHref);
+    const names = glue.musicModeNames().split(',');
+    post({ type: 'modes', id: msg.id, names });
+  } catch {
+    post({ type: 'modes', id: msg.id, names: [] });
+  }
+}
+
+self.onmessage = async (evt: MessageEvent<MainWorkerMessage>) => {
   const msg = evt.data;
+  if (msg.type === 'get_modes') { await handleGetModes(msg); return; }
   if (msg.type !== 'generate') return;
 
-  const { id, wasmScriptHref, fileName, buffer } = msg;
+  const { id, wasmScriptHref, fileName, buffer, mode } = msg;
 
   let metadataView: SongMetadataJs | undefined;
+  let drumGen: DrumSampleGeneratorHandle | undefined;
 
   try {
     const glue = await loadGlue(wasmScriptHref);
@@ -56,7 +70,7 @@ self.onmessage = async (evt: MessageEvent<MainGenerateMessage>) => {
 
     let info: ChiptuneSongInfo;
     try {
-      metadataView = glue.createSongMetadataFromString(fileName, dataByteLen);
+      metadataView = glue.createSongMetadataFromStringWithMode(fileName, dataByteLen, mode ?? 'chiptune');
       info = songInfoFromMetadataView(metadataView);
     } catch {
       post({
@@ -88,7 +102,7 @@ self.onmessage = async (evt: MessageEvent<MainGenerateMessage>) => {
         pcmSampleCapacityHint,
       });
 
-      const drumGen = new DrumSampleGenerator(metadataView, hz);
+      drumGen = glue.DrumSampleGenerator.withMetadata(metadataView, hz);
 
       const totalPcmSamples = streamPcmChunksFromIncrementalPlan(
         glue.SongNoteReader,
@@ -115,6 +129,7 @@ self.onmessage = async (evt: MessageEvent<MainGenerateMessage>) => {
     const message = e instanceof Error ? e.message : String(e);
     post({ type: 'error', id, phase: 'metadata', message });
   } finally {
+    drumGen?.free();
     metadataView?.free();
   }
 };

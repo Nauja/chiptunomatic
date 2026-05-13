@@ -1,12 +1,22 @@
 import type { ChiptuneSongInfo } from './chiptunomatic-types';
 
 /** Main thread → worker. */
+export type MainWorkerMessage = MainGenerateMessage | MainGetModesMessage;
+
 export interface MainGenerateMessage {
   type: 'generate';
   id: number;
   wasmScriptHref: string;
   fileName: string;
   buffer: ArrayBuffer;
+  /** Plugin mode name, e.g. `"chiptune"`, `"lofi"`, `"rock"`, … */
+  mode: string;
+}
+
+export interface MainGetModesMessage {
+  type: 'get_modes';
+  id: number;
+  wasmScriptHref: string;
 }
 
 /** Worker → main: progressive WAV is shipped as PCM chunks, then finalized on [`wav_end`]. */
@@ -21,4 +31,5 @@ export type WorkerGenerateReply =
     }
   | { type: 'wav_pcm_chunk'; id: number; pcm: ArrayBuffer }
   | { type: 'wav_end'; id: number; totalPcmSamples: number }
-  | { type: 'error'; id: number; phase: 'metadata' | 'wav'; message: string };
+  | { type: 'error'; id: number; phase: 'metadata' | 'wav'; message: string }
+  | { type: 'modes'; id: number; names: string[] };

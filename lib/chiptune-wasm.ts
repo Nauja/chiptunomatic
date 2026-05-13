@@ -14,5 +14,6 @@ export {
   ChiptunomaticGenerationError,
   type ChiptuneStreamingHooks,
   runChiptunomaticGeneration,
+  getMusicModes,
 } from './chiptunomatic-worker-client';
 

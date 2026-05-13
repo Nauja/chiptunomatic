@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use chiptunomatic::constants::{NOTE_NAMES, SAMPLE_RATE};
-use chiptunomatic::SongMetadata;
+use chiptunomatic::{Chiptunomatic, MixGenerator, SongMetadata};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -72,16 +72,80 @@ fn volume_bar(level: f32, height: u16) -> Paragraph<'static> {
     Paragraph::new(lines)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusedButton {
+    Muted(u8), // stem: 0=voice 1=square 2=triangle 3=noise
+    Solo(u8),
+}
+
+impl FocusedButton {
+    fn next(self) -> Self {
+        match self {
+            Self::Muted(s) => Self::Solo(s),
+            Self::Solo(3) => Self::Muted(0),
+            Self::Solo(s) => Self::Muted(s + 1),
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            Self::Solo(s) => Self::Muted(s),
+            Self::Muted(0) => Self::Solo(3),
+            Self::Muted(s) => Self::Solo(s - 1),
+        }
+    }
+}
+
+fn button_widget(
+    label: &'static str,
+    active: bool,
+    focused: bool,
+    active_color: Color,
+) -> Paragraph<'static> {
+    let style = if focused && active {
+        Style::default()
+            .fg(active_color)
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else if focused {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else if active {
+        Style::default()
+            .fg(active_color)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    Paragraph::new(Span::styled(label, style))
+}
+
+fn next_mode(modes: &[String], mode: &String) -> String {
+    for (i, m) in modes.iter().enumerate() {
+        if m == mode && i + 1 < modes.len() {
+            return modes[i + 1].clone();
+        }
+    }
+    modes[0].clone()
+}
+
+fn prev_mode(modes: &[String], mode: &String) -> String {
+    for (i, m) in modes.iter().enumerate() {
+        if m == mode && i > 0 {
+            return modes[i - 1].clone();
+        }
+    }
+    modes.last().cloned().unwrap_or_else(|| mode.clone())
+}
+
 fn spawn_audio_worker(
-    cmd_rx: mpsc::Receiver<(u64, PathBuf)>,
+    cmd_rx: mpsc::Receiver<(u64, PathBuf, String)>,
     done_tx: mpsc::Sender<Result<(), String>>,
     started_tx: mpsc::Sender<String>,
     ready_tx: mpsc::SyncSender<Result<(), String>>,
     live_generation: Arc<AtomicU64>,
     stem_plot: Arc<Mutex<StemPlotBuffer>>,
     playback_progress: Arc<PlaybackProgress>,
-    volume: f32,
     is_paused: Arc<AtomicBool>,
+    shared_mix: Arc<Mutex<MixGenerator>>,
 ) {
     let mut audio = match AudioPlayer::new(SAMPLE_RATE) {
         Ok(a) => a,
@@ -90,14 +154,16 @@ fn spawn_audio_worker(
             return;
         }
     };
-    audio.sink.set_volume(volume);
+    audio.sink.set_volume(1.0);
     if ready_tx.send(Ok(())).is_err() {
         return;
     }
 
-    while let Ok((mut gen, mut path)) = cmd_rx.recv() {
-        while let Ok((ng, np)) = cmd_rx.try_recv() {
-            (gen, path) = (ng, np);
+    let mut instance = Chiptunomatic::new().with_default_plugins();
+
+    while let Ok((mut gen, mut path, mut mode)) = cmd_rx.recv() {
+        while let Ok((ng, np, nm)) = cmd_rx.try_recv() {
+            (gen, path, mode) = (ng, np, nm);
         }
 
         audio.sink.stop();
@@ -107,7 +173,13 @@ fn spawn_audio_worker(
             plot.clear();
         }
 
-        match SongMetadata::from_path(&path) {
+        if let Err(e) = instance.set_mode(&mode) {
+            playback_progress.reset_idle();
+            let _ = done_tx.send(Err(format!("{e:#}")));
+            continue;
+        }
+
+        match instance.load_song_metadata_from_path(&path) {
             Ok(md) => {
                 let total_samples = ((f64::from(SAMPLE_RATE)) * md.total_duration)
                     .ceil()
@@ -135,9 +207,11 @@ fn spawn_audio_worker(
             stem_plot: stem_plot.clone(),
             playback_progress: Arc::clone(&playback_progress),
             is_paused: Arc::clone(&is_paused),
+            shared_mix: Arc::clone(&shared_mix),
+            peak: 0.0,
         };
 
-        let outcome = match drive_synthesis(&path, &mut sink) {
+        let outcome = match drive_synthesis(&mut instance, &path, &mut sink) {
             Ok(o) => o,
             Err(e) => {
                 playback_progress.reset_idle();
@@ -203,12 +277,18 @@ fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io
     Ok(())
 }
 
-pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
+pub fn run(
+    mut instance: Chiptunomatic,
+    initial_file: Option<&Path>,
+    mix_generator: MixGenerator,
+) -> Result<()> {
     let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let live_generation = Arc::new(AtomicU64::new(0));
     let live_gen_worker = Arc::clone(&live_generation);
 
-    let (cmd_tx, cmd_rx) = mpsc::channel::<(u64, PathBuf)>();
+    let (cmd_tx, cmd_rx) = mpsc::channel::<(u64, PathBuf, String)>();
+    let modes = instance.modes_string();
+    let mut mode = instance.mode_string();
     let (done_tx, done_rx) = mpsc::channel::<Result<(), String>>();
     let (started_tx, started_rx) = mpsc::channel::<String>();
 
@@ -222,6 +302,9 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
     let is_paused = Arc::new(AtomicBool::new(false));
     let is_paused_worker = Arc::clone(&is_paused);
 
+    let shared_mix = Arc::new(Mutex::new(mix_generator));
+    let shared_mix_worker = Arc::clone(&shared_mix);
+
     std::thread::spawn(move || {
         spawn_audio_worker(
             cmd_rx,
@@ -231,8 +314,8 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
             live_gen_worker,
             stem_plot_worker,
             playback_progress_worker,
-            volume,
             is_paused_worker,
+            shared_mix_worker,
         )
     });
 
@@ -262,6 +345,7 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
         .map_err(anyhow::Error::from)?
     };
 
+    let mut focused_button: Option<FocusedButton> = None;
     let mut last_sel: Option<PathBuf> = None;
     let mut meta_title: String = "Song".into();
     let mut meta_text: Text<'static> = Text::from(vec![
@@ -280,8 +364,9 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
             let gen = live_generation.fetch_add(1, Ordering::SeqCst) + 1;
             let cur = file_explorer.current();
             let (cur_path, cur_name) = (cur.path.clone(), cur.name.clone());
-            if cmd_tx.send((gen, cur_path.clone())).is_ok() {
-                playing_meta = SongMetadata::from_path(&cur_path)
+            if cmd_tx.send((gen, cur_path.clone(), mode.clone())).is_ok() {
+                playing_meta = instance
+                    .load_song_metadata_from_path(&cur_path)
                     .ok()
                     .map(|m| format_metadata(&m));
                 current_playing = Some(cur_path);
@@ -317,7 +402,7 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                     Line::from("This is a directory. Open files with l / Right / Enter."),
                 ])
             } else {
-                match SongMetadata::from_path(&current) {
+                match instance.song_metadata_from_path(&current) {
                     Ok(m) => format_metadata(&m),
                     Err(e) => Text::from(format!(
                         "{}\n\nCould not read metadata:\n{e:#}",
@@ -349,7 +434,13 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                 Span::styled(" h j k l ", Style::default().fg(Color::Yellow)),
                 Span::raw(" nav  ·  "),
                 Span::styled(" Ctrl+h ", Style::default().fg(Color::Yellow)),
-                Span::raw(" hidden"),
+                Span::raw(" hidden  ·  "),
+                Span::styled(" m / M ", Style::default().fg(Color::Yellow)),
+                Span::raw(format!(" mode [{}]  ·  ", mode)),
+                Span::styled(" Tab ", Style::default().fg(Color::Yellow)),
+                Span::raw(" focus M/S  ·  "),
+                Span::styled(" Space ", Style::default().fg(Color::Yellow)),
+                Span::raw(" toggle"),
             ]));
             let help_content_w = area.width.max(1);
             let help_need_lines = Paragraph::new(help_keys_text.clone())
@@ -366,7 +457,7 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(help_h)]).areas(area);
 
             let [play_col, right_col] =
-                Layout::horizontal([Constraint::Percentage(48), Constraint::Percentage(52)])
+                Layout::horizontal([Constraint::Percentage(75), Constraint::Percentage(25)])
                     .areas(main_row);
 
             const MIN_EXPLORER_ROWS: u16 = 8;
@@ -468,19 +559,25 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
             .areas(play_inner);
 
             const BAR_W: u16 = 3;
-            let px = stems_area.width.saturating_sub(6) as usize;
+            // Each chart occupies roughly half the stems width — scale points accordingly.
+            let px = (stems_area.width.saturating_sub(6) / 2) as usize;
             let px = px.max(16);
 
-            let (sq_pts, tr_pts, nz_pts, sq_vol, tr_vol, nz_vol) = stem_plot
+            let mg = shared_mix.lock().map(|g| *g).unwrap_or_default();
+
+            let (vc_pts, sq_pts, tr_pts, nz_pts, vc_vol, sq_vol, tr_vol, nz_vol) = stem_plot
                 .lock()
                 .map(|g| {
+                    let mv = mg.effective_master_volume();
                     (
+                        waveform_points(g.voice(), px),
                         waveform_points(g.square(), px),
                         waveform_points(g.triangle(), px),
                         waveform_points(g.noise(), px),
-                        (g.square_peak() * 3.0 * volume).min(1.0),
-                        (g.triangle_peak() * 3.0 * volume).min(1.0),
-                        (g.noise_peak() * 3.0 * volume).min(1.0),
+                        (g.voice_peak() * 3.0 * mv * mg.effective_voice_volume()).min(1.0),
+                        (g.square_peak() * 3.0 * mv * mg.effective_square_volume()).min(1.0),
+                        (g.triangle_peak() * 3.0 * mv * mg.effective_triangle_volume()).min(1.0),
+                        (g.noise_peak() * 3.0 * mv * mg.effective_noise_volume()).min(1.0),
                     )
                 })
                 .unwrap_or_else(|_| {
@@ -488,30 +585,52 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                         vec![(0.0, 0.0), (1.0, 0.0)],
                         vec![(0.0, 0.0), (1.0, 0.0)],
                         vec![(0.0, 0.0), (1.0, 0.0)],
+                        vec![(0.0, 0.0), (1.0, 0.0)],
+                        0.0,
                         0.0,
                         0.0,
                         0.0,
                     )
                 });
 
-            let [sq_r, tr_r, nz_r] = Layout::vertical([
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-            ])
-            .areas(stems_area);
+            // 2×2 grid: voice (TL) | square (TR) / triangle (BL) | noise (BR)
+            let [top_row, bottom_row] =
+                Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(stems_area);
+            let [vc_r, sq_r] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(top_row);
+            let [tr_r, nz_r] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(bottom_row);
 
-            let make_bar_rect = |area: Rect| {
-                Rect::new(
-                    area.right().saturating_sub(1 + BAR_W),
-                    area.y + 1,
-                    BAR_W.min(area.width.saturating_sub(2)),
-                    area.height.saturating_sub(2),
-                )
+            // Returns (volume_bar, mute_btn, solo_btn) rects within a stem cell.
+            // Volume bar shrinks by 2 rows to make room for M and S buttons.
+            let make_stem_rects = |area: Rect| -> (Rect, Rect, Rect) {
+                let inner_h = area.height.saturating_sub(2);
+                let bar_h = inner_h.saturating_sub(2);
+                let x = area.right().saturating_sub(1 + BAR_W);
+                let w = BAR_W.min(area.width.saturating_sub(2));
+                let bar = Rect::new(x, area.y + 1, w, bar_h);
+                let mute = Rect::new(
+                    x,
+                    area.y + 1 + bar_h,
+                    w,
+                    inner_h.saturating_sub(bar_h).min(1),
+                );
+                let solo = Rect::new(
+                    x,
+                    area.y + 2 + bar_h,
+                    w,
+                    inner_h.saturating_sub(bar_h + 1).min(1),
+                );
+                (bar, mute, solo)
             };
-            let sq_bar_r = make_bar_rect(sq_r);
-            let tr_bar_r = make_bar_rect(tr_r);
-            let nz_bar_r = make_bar_rect(nz_r);
+
+            let (vc_bar_r, vc_mute_r, vc_solo_r) = make_stem_rects(vc_r);
+            let (sq_bar_r, sq_mute_r, sq_solo_r) = make_stem_rects(sq_r);
+            let (tr_bar_r, tr_mute_r, tr_solo_r) = make_stem_rects(tr_r);
+            let (nz_bar_r, nz_mute_r, nz_solo_r) = make_stem_rects(nz_r);
 
             let total_smpl = playback_progress.total_samples();
             let elapsed_smpl = playback_progress.elapsed_samples();
@@ -540,15 +659,92 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
 
             f.render_widget_ref(file_explorer.widget(), explorer_area);
 
+            f.render_widget(stem_line_chart("voice", &vc_pts, Color::LightGreen), vc_r);
+            f.render_widget(volume_bar(vc_vol, vc_bar_r.height), vc_bar_r);
+            f.render_widget(
+                button_widget(
+                    "[M]",
+                    mg.voice_output.muted,
+                    focused_button == Some(FocusedButton::Muted(0)),
+                    Color::Red,
+                ),
+                vc_mute_r,
+            );
+            f.render_widget(
+                button_widget(
+                    "[S]",
+                    mg.voice_output.solo,
+                    focused_button == Some(FocusedButton::Solo(0)),
+                    Color::Yellow,
+                ),
+                vc_solo_r,
+            );
+
             f.render_widget(stem_line_chart("square", &sq_pts, Color::Cyan), sq_r);
             f.render_widget(volume_bar(sq_vol, sq_bar_r.height), sq_bar_r);
+            f.render_widget(
+                button_widget(
+                    "[M]",
+                    mg.square_output.muted,
+                    focused_button == Some(FocusedButton::Muted(1)),
+                    Color::Red,
+                ),
+                sq_mute_r,
+            );
+            f.render_widget(
+                button_widget(
+                    "[S]",
+                    mg.square_output.solo,
+                    focused_button == Some(FocusedButton::Solo(1)),
+                    Color::Yellow,
+                ),
+                sq_solo_r,
+            );
+
             f.render_widget(
                 stem_line_chart("triangle", &tr_pts, Color::LightMagenta),
                 tr_r,
             );
             f.render_widget(volume_bar(tr_vol, tr_bar_r.height), tr_bar_r);
+            f.render_widget(
+                button_widget(
+                    "[M]",
+                    mg.triangle_output.muted,
+                    focused_button == Some(FocusedButton::Muted(2)),
+                    Color::Red,
+                ),
+                tr_mute_r,
+            );
+            f.render_widget(
+                button_widget(
+                    "[S]",
+                    mg.triangle_output.solo,
+                    focused_button == Some(FocusedButton::Solo(2)),
+                    Color::Yellow,
+                ),
+                tr_solo_r,
+            );
+
             f.render_widget(stem_line_chart("noise", &nz_pts, Color::Yellow), nz_r);
             f.render_widget(volume_bar(nz_vol, nz_bar_r.height), nz_bar_r);
+            f.render_widget(
+                button_widget(
+                    "[M]",
+                    mg.noise_output.muted,
+                    focused_button == Some(FocusedButton::Muted(3)),
+                    Color::Red,
+                ),
+                nz_mute_r,
+            );
+            f.render_widget(
+                button_widget(
+                    "[S]",
+                    mg.noise_output.solo,
+                    focused_button == Some(FocusedButton::Solo(3)),
+                    Color::Yellow,
+                ),
+                nz_solo_r,
+            );
             if play_meta_inner_h > 0 {
                 f.render_widget(
                     Paragraph::new(play_meta_text).wrap(Wrap { trim: true }),
@@ -568,7 +764,53 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
             if let Event::Key(key) = &ev {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('q') | KeyCode::Esc if focused_button.is_none() => break,
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            focused_button = None;
+                            continue;
+                        }
+                        KeyCode::Tab => {
+                            focused_button =
+                                Some(focused_button.map_or(FocusedButton::Muted(0), |b| b.next()));
+                            continue;
+                        }
+                        KeyCode::BackTab => {
+                            focused_button =
+                                Some(focused_button.map_or(FocusedButton::Solo(3), |b| b.prev()));
+                            continue;
+                        }
+                        KeyCode::Char(' ') if focused_button.is_some() => {
+                            if let (Some(btn), Ok(mut mg)) = (focused_button, shared_mix.lock()) {
+                                match btn {
+                                    FocusedButton::Muted(0) => {
+                                        mg.voice_output.muted = !mg.voice_output.muted
+                                    }
+                                    FocusedButton::Muted(1) => {
+                                        mg.square_output.muted = !mg.square_output.muted
+                                    }
+                                    FocusedButton::Muted(2) => {
+                                        mg.triangle_output.muted = !mg.triangle_output.muted
+                                    }
+                                    FocusedButton::Muted(3) => {
+                                        mg.noise_output.muted = !mg.noise_output.muted
+                                    }
+                                    FocusedButton::Solo(0) => {
+                                        mg.voice_output.solo = !mg.voice_output.solo
+                                    }
+                                    FocusedButton::Solo(1) => {
+                                        mg.square_output.solo = !mg.square_output.solo
+                                    }
+                                    FocusedButton::Solo(2) => {
+                                        mg.triangle_output.solo = !mg.triangle_output.solo
+                                    }
+                                    FocusedButton::Solo(3) => {
+                                        mg.noise_output.solo = !mg.noise_output.solo
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            continue;
+                        }
                         KeyCode::Enter => {
                             let cur = file_explorer.current();
                             if cur.is_file() {
@@ -579,14 +821,15 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                                 } else {
                                     is_paused.store(false, Ordering::SeqCst);
                                     let gen = live_generation.fetch_add(1, Ordering::SeqCst) + 1;
-                                    if cmd_tx.send((gen, cur.path.clone())).is_ok() {
+                                    if cmd_tx.send((gen, cur.path.clone(), mode.clone())).is_ok() {
                                         let verb = if current_playing.is_some() {
                                             "Stopping current playback; starting"
                                         } else {
                                             "Starting"
                                         };
                                         playback_hint = format!("{verb}: {}", cur.name);
-                                        playing_meta = SongMetadata::from_path(&cur.path)
+                                        playing_meta = instance
+                                            .load_song_metadata_from_path(&cur.path)
                                             .ok()
                                             .map(|m| format_metadata(&m));
                                         current_playing = Some(cur.path.clone());
@@ -595,6 +838,46 @@ pub fn run(initial_file: Option<&Path>, volume: f32) -> Result<()> {
                                 }
                                 continue;
                             }
+                        }
+                        KeyCode::Char('m') => {
+                            mode = next_mode(&modes, &mode);
+                            instance.set_mode(&mode)?;
+                            last_sel = None;
+                            if let Some(path) = current_playing.clone() {
+                                is_paused.store(false, Ordering::SeqCst);
+                                let gen = live_generation.fetch_add(1, Ordering::SeqCst) + 1;
+                                if cmd_tx.send((gen, path.clone(), mode.clone())).is_ok() {
+                                    playback_hint = format!("Mode: {} — restarting", mode);
+                                    playing_meta = instance
+                                        .load_song_metadata_from_path(&path)
+                                        .ok()
+                                        .map(|m| format_metadata(&m));
+                                    last_finished = None;
+                                }
+                            } else {
+                                playback_hint = format!("Mode: {}", mode);
+                            }
+                            continue;
+                        }
+                        KeyCode::Char('M') => {
+                            mode = prev_mode(&modes, &mode);
+                            instance.set_mode(&mode)?;
+                            last_sel = None;
+                            if let Some(path) = current_playing.clone() {
+                                is_paused.store(false, Ordering::SeqCst);
+                                let gen = live_generation.fetch_add(1, Ordering::SeqCst) + 1;
+                                if cmd_tx.send((gen, path.clone(), mode.clone())).is_ok() {
+                                    playback_hint = format!("Mode: {} — restarting", mode);
+                                    playing_meta = instance
+                                        .load_song_metadata_from_path(&path)
+                                        .ok()
+                                        .map(|m| format_metadata(&m));
+                                    last_finished = None;
+                                }
+                            } else {
+                                playback_hint = format!("Mode: {}", mode);
+                            }
+                            continue;
                         }
                         _ => {}
                     }

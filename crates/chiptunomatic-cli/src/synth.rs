@@ -5,7 +5,8 @@ use std::fs::File;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anyhow::Result;
-use chiptunomatic::{Mix, ReadSongNotes, Sample, SongMetadata, StdDrumSampleGenerator};
+use chiptunomatic::{ArpeggioConfig, ArpeggioPattern, Chiptunomatic, Mix, MixGenerator, Sample};
+use rand::rngs::StdRng;
 
 /// Signals that TUI playback was interrupted to start another file or stop streaming.
 #[derive(Debug)]
@@ -36,21 +37,29 @@ pub(crate) enum SynthCompletion {
 }
 
 pub(crate) fn drive_synthesis(
+    instance: &mut Chiptunomatic,
     path: &std::path::Path,
     consumer: &mut dyn MixChunkSink,
 ) -> Result<SynthCompletion> {
-    let metadata = SongMetadata::from_path(path)?;
     let reader = File::open(path)?;
-    drive_synthesis_reader(metadata, reader, consumer)
+    drive_synthesis_reader(instance, reader, consumer)
 }
 
 pub(crate) fn drive_synthesis_reader(
-    metadata: SongMetadata,
+    instance: &mut Chiptunomatic,
     reader: File,
     consumer: &mut dyn MixChunkSink,
 ) -> Result<SynthCompletion> {
-    let song_samples = ReadSongNotes::new(metadata.clone(), reader).samples();
-    let drum_samples = StdDrumSampleGenerator::new(metadata).samples();
+    let song_samples = instance
+        .read_song_notes(reader)
+        .with_capacity(1024)
+        .with_arpeggio(ArpeggioConfig {
+            subdivisions: 1,
+            pattern: ArpeggioPattern::UpDown,
+        })
+        .samples();
+    let drum_samples = instance.sample_drum_steps::<StdRng>();
+    // Use a bare default generator here; PlaybackSink re-applies volumes/muting per-chunk.
     let mut mixes = song_samples.mix(drum_samples);
     let mut mixes_buffer = [Mix::default(); 1024];
     let mut interrupted = false;
@@ -152,6 +161,10 @@ pub(crate) struct PlaybackSink<'a> {
     pub(crate) stem_plot: std::sync::Arc<std::sync::Mutex<crate::stem_plot::StemPlotBuffer>>,
     pub(crate) playback_progress: std::sync::Arc<PlaybackProgress>,
     pub(crate) is_paused: std::sync::Arc<AtomicBool>,
+    /// Shared with the UI thread so mute/solo/volume changes take effect immediately.
+    pub(crate) shared_mix: std::sync::Arc<std::sync::Mutex<MixGenerator>>,
+    /// Running peak across the whole track for normalisation.
+    pub(crate) peak: f32,
 }
 
 impl MixChunkSink for PlaybackSink<'_> {
@@ -170,7 +183,28 @@ impl MixChunkSink for PlaybackSink<'_> {
             return Ok(());
         }
 
-        let chunk: Vec<f32> = mixes.iter().map(|m| m.frequency).collect();
+        // Snapshot the current mix settings (lock is released immediately after copy).
+        let mg = self.shared_mix.lock().map(|g| *g).unwrap_or_default();
+
+        // Re-apply per-stem volumes/muting from the live snapshot.
+        // `Mix.sample` holds raw per-stem synthesis output (bare default generator was used).
+        let mut peak = self.peak;
+        let mut chunk = Vec::with_capacity(mixes.len());
+        for m in mixes {
+            let voice = m.sample.song.voice.value * mg.effective_voice_volume();
+            let square = m.sample.song.square.value * mg.effective_square_volume();
+            let triangle = m.sample.song.triangle.value * mg.effective_triangle_volume();
+            let noise = m.sample.drum * mg.effective_noise_volume();
+            let mut mixed = voice + square + triangle + noise;
+            peak = peak.max(mixed.abs());
+            if peak > 0.0 {
+                mixed /= peak;
+            }
+            mixed *= 0.9 * mg.effective_master_volume();
+            chunk.push(mixed);
+        }
+        self.peak = peak;
+
         self.audio.append(chunk.as_slice());
         self.playback_progress.add_samples(chunk.len() as u64);
 
