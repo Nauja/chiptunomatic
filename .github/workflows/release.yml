@@ -12,24 +12,41 @@ on:
         required: false
         default: false
         type: boolean
+      build_run_id:
+        description: Run ID of a completed Build workflow to reuse artifacts from (leave blank to build fresh).
+        required: false
+        type: string
 
-# Reusable build uploads artifacts; publishing needs contents + actions token scope.
 permissions:
   contents: write
-  actions: write
+  actions: read
 
 jobs:
   build:
+    if: ${{ inputs.build_run_id == '' }}
     uses: ./.github/workflows/build.yml
 
   publish:
     name: Create GitHub release
-    needs: build
+    needs: [build]
+    if: ${{ always() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v7
+      - name: Download artifacts from specified build run
+        if: ${{ inputs.build_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: '*'
+          merge-multiple: true
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download artifacts from current workflow run
+        if: ${{ inputs.build_run_id == '' }}
+        uses: actions/download-artifact@v4
         with:
           path: release-assets
           pattern: '*'
