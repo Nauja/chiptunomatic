@@ -12,3 +12,4 @@ target/
 demo.yml
 *.wav
 memory/
+deny.toml

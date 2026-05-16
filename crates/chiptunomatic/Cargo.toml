@@ -2,6 +2,8 @@
 name = "chiptunomatic"
 version = "0.2.1"
 edition = "2021"
+license = "AGPL-3.0"
+repository = "https://github.com/Nauja/chiptunomatic"
 description = "Deterministic chiptune generator from binary input (WASM-compatible library)"
 
 [lib]

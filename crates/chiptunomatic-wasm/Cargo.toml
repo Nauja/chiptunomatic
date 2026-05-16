@@ -2,6 +2,8 @@
 name = "chiptunomatic-wasm"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0"
+repository = "https://github.com/Nauja/chiptunomatic"
 description = "WebAssembly bindings for chiptunomatic (incremental synthesis for JS)"
 
 [lib]
