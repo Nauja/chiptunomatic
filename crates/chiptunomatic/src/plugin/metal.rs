@@ -92,17 +92,18 @@ impl Plugin for MetalPlugin {
             return Vec::new();
         }
         let dur = total as f64 / sr;
-        // Power chord: root + perfect fifth, hard-clipped for maximum distortion.
-        let root = square(sr, midi_to_hz(note.midi), dur, 0.38, 0.5);
-        let fifth = square(sr, midi_to_hz(note.midi + 7.0), dur, 0.28, 0.5);
+        // Power chord: root + perfect fifth, hard-clipped for distortion character.
+        let root = square(sr, midi_to_hz(note.midi), dur, 0.25, 0.5);
+        let fifth = square(sr, midi_to_hz(note.midi + 7.0), dur, 0.18, 0.5);
         let root = envelope(sr, &root, 0.001, 0.012, 0.92, 0.015);
         let fifth = envelope(sr, &fifth, 0.001, 0.012, 0.92, 0.015);
         (0..total)
             .map(|i| {
                 let s = root.get(i).copied().unwrap_or(0.0) + fifth.get(i).copied().unwrap_or(0.0);
-                // Hard clip at ±0.65 for a squared-off, saturated guitar tone.
+                // Hard clip at ±0.65 then scale down — keeps the squared-off character
+                // without pushing to full scale.
                 StemSample {
-                    value: s.clamp(-0.65, 0.65) / 0.65,
+                    value: s.clamp(-0.65, 0.65) * 0.55,
                     byte_index: note.byte_index,
                 }
             })
@@ -117,15 +118,15 @@ impl Plugin for MetalPlugin {
         }
         let dur = total as f64 / sr;
         // Thick distorted bass — square wave driven hard through a soft saturator.
-        let raw = square(sr, midi_to_hz(note.midi), dur, 0.55, 0.5);
+        let raw = square(sr, midi_to_hz(note.midi), dur, 0.38, 0.5);
         let saturated: Vec<f32> = raw
             .iter()
             .map(|&s| {
-                let d = s * 2.8;
-                (d / (1.0 + d.abs())) * 0.90
+                let d = s * 2.2;
+                (d / (1.0 + d.abs())) * 0.80
             })
             .collect();
-        let with_env = envelope(sr, &saturated, 0.001, 0.018, 0.88, 0.015);
+        let with_env = envelope(sr, &saturated, 0.001, 0.018, 0.75, 0.015);
         (0..total.min(with_env.len()))
             .map(|i| StemSample {
                 value: with_env[i],
@@ -142,12 +143,12 @@ impl Plugin for MetalPlugin {
             return Vec::new();
         }
         let dur = total as f64 / sr;
-        let raw = vibrato_sine(sr, midi_to_hz(note.midi), dur, 0.14, 7.0, 0.04);
-        let shaped = envelope(sr, &raw, 0.004, 0.035, 0.88, 0.040);
+        let raw = vibrato_sine(sr, midi_to_hz(note.midi), dur, 0.10, 7.0, 0.04);
+        let shaped = envelope(sr, &raw, 0.004, 0.035, 0.72, 0.040);
         (0..total)
             .map(|i| {
                 let s = shaped.get(i).copied().unwrap_or(0.0);
-                let d = s * 3.2;
+                let d = s * 2.2;
                 StemSample {
                     value: d / (1.0 + d.abs()),
                     byte_index: note.byte_index,
@@ -161,12 +162,12 @@ impl Plugin for MetalPlugin {
             // Heavy double-kick thud: square body + sine sub for low-end weight.
             let freq = 55.0 + f64::from(config.color % 8);
             let dur_sec = (0.065_f64).min(config.step_duration);
-            let body = square(config.sample_rate, freq, dur_sec, 0.70, 0.5);
+            let body = square(config.sample_rate, freq, dur_sec, 0.48, 0.5);
             overlay_samples(
                 &envelope(config.sample_rate, &body, 0.001, 0.040, 0.0, 0.010),
                 samples,
             );
-            let sub = sine(config.sample_rate, 42.0, dur_sec, 0.38);
+            let sub = sine(config.sample_rate, 42.0, dur_sec, 0.26);
             overlay_samples(
                 &envelope(config.sample_rate, &sub, 0.001, 0.055, 0.0, 0.010),
                 samples,
@@ -175,7 +176,7 @@ impl Plugin for MetalPlugin {
         if step.snare {
             // Explosive snare: maximum-amplitude noise burst + pitched crack on backbeats.
             let accent = config.pattern == 4 || config.pattern == 12;
-            let amp = if accent { 0.52 } else { 0.22 };
+            let amp = if accent { 0.36 } else { 0.16 };
             let dur_n = (0.055_f64).min(config.step_duration);
             let raw = noise_burst(config.sample_rate, &config.random, dur_n, amp);
             overlay_samples(
@@ -183,7 +184,7 @@ impl Plugin for MetalPlugin {
                 samples,
             );
             if accent {
-                let tone = sine(config.sample_rate, 220.0, dur_n, 0.22);
+                let tone = sine(config.sample_rate, 220.0, dur_n, 0.16);
                 overlay_samples(
                     &envelope(config.sample_rate, &tone, 0.0, 0.018, 0.0, 0.010),
                     samples,
@@ -195,11 +196,11 @@ impl Plugin for MetalPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.090_f64).min(config.step_duration * 2.0);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.24);
+                    let s = noise_burst(config.sample_rate, &config.random, d, 0.16);
                     envelope(config.sample_rate, &s, 0.0, 0.035, 0.08, 0.025)
                 } else {
                     let d = (0.014_f64).min(config.step_duration * 0.32);
-                    noise_burst(config.sample_rate, &config.random, d, 0.22)
+                    noise_burst(config.sample_rate, &config.random, d, 0.14)
                 },
                 samples,
             );
