@@ -45,10 +45,26 @@ export interface ChiptunePlanNoteHandle {
   free(): void;
 }
 
-/** Wasm-pack glue shape for `SampleGenerator`. */
+/** Wasm-pack glue shape for `SampleGenerator` instance. */
 export interface ChiptunomaticSampleGenerator {
   samplesForPlanNote(note: ChiptunePlanNoteHandle): ChiptuneSampleHandle[];
   free(): void;
+}
+
+/** Static side of `SampleGenerator` — created via `withMetadata`. */
+export interface ChiptunomaticSampleGeneratorStatics {
+  withMetadata(metadata: SongMetadataJs, sampleRateHz: number): ChiptunomaticSampleGenerator;
+}
+
+/** WASM `DrumSampleGenerator` instance — call `nextSample()` once per output audio sample. */
+export interface DrumSampleGeneratorHandle {
+  nextSample(): number;
+  free(): void;
+}
+
+/** Static side of `DrumSampleGenerator` — created via `withMetadata`. */
+export interface DrumSampleGeneratorStatics {
+  withMetadata(metadata: SongMetadataJs, sampleRateHz: number): DrumSampleGeneratorHandle;
 }
 
 /** `SampleWasm`; release after use. */
@@ -76,10 +92,18 @@ export interface ChiptunomaticWasmModule {
   SongNoteReader: {
     withMetadata(metadata: SongMetadataJs): ChiptuneSongNoteReaderHandle;
   };
-  SampleGenerator: new (sampleRateHz: number) => ChiptunomaticSampleGenerator;
+  SampleGenerator: ChiptunomaticSampleGeneratorStatics;
   IterMix: new () => ChiptunomaticIterMix;
   createSongMetadataFromString(
     name: string,
     dataByteLen: bigint,
   ): SongMetadataJs;
+  createSongMetadataFromStringWithMode(
+    name: string,
+    dataByteLen: bigint,
+    mode: string,
+  ): SongMetadataJs;
+  DrumSampleGenerator: DrumSampleGeneratorStatics;
+  /** Returns comma-separated mode names. */
+  musicModeNames(): string;
 }

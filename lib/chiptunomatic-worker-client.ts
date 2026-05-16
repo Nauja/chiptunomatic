@@ -4,6 +4,7 @@ import type { ChiptuneSongInfo } from "./chiptunomatic-types";
 import { concatenatePcmChunksToInt16, pcm16MonoToWav } from "./wav-mono-i16";
 import type {
   MainGenerateMessage,
+  MainGetModesMessage,
   WorkerGenerateReply,
 } from "./chiptunomatic-worker-messages";
 
@@ -49,6 +50,7 @@ type PendingHandlers = {
 };
 
 const pendingById = new Map<number, PendingHandlers>();
+const pendingModesById = new Map<number, (names: string[]) => void>();
 
 export class ChiptunomaticGenerationError extends Error {
   readonly phase: "metadata" | "wav";
@@ -102,6 +104,16 @@ function appendPcmChunk(p: PendingHandlers, pcm: ArrayBuffer): void {
 function installWorkerListener(w: Worker) {
   w.addEventListener("message", (ev: MessageEvent<WorkerGenerateReply>) => {
     const d = ev.data;
+
+    if (d.type === "modes") {
+      const resolve = pendingModesById.get(d.id);
+      if (resolve) {
+        pendingModesById.delete(d.id);
+        resolve(d.names);
+      }
+      return;
+    }
+
     const p = pendingById.get(d.id);
     if (!p) return;
 
@@ -192,6 +204,27 @@ function acquireWorker(): Worker {
   return worker;
 }
 
+/** Returns all mode names in WASM integer order, obtained from the chiptunomatic crate via the worker. */
+export function getMusicModes(): Promise<string[]> {
+  if (typeof window === "undefined") return Promise.resolve([]);
+  const id = serial++;
+  const w = acquireWorker();
+  return new Promise<string[]>((resolve) => {
+    pendingModesById.set(id, resolve);
+    const msg: MainGetModesMessage = {
+      type: "get_modes",
+      id,
+      wasmScriptHref: wasmGlueHref(),
+    };
+    try {
+      w.postMessage(msg);
+    } catch {
+      pendingModesById.delete(id);
+      resolve([]);
+    }
+  });
+}
+
 /**
  * Streams metadata from the worker, then transports mono PCM in chunks and returns a finished WAV blob.
  */
@@ -201,6 +234,7 @@ export async function runChiptunomaticGeneration(
   options?: {
     signal?: AbortSignal;
     streaming?: ChiptuneStreamingHooks;
+    mode?: string;
   },
 ): Promise<Uint8Array> {
   if (typeof window === "undefined") {
@@ -263,6 +297,7 @@ export async function runChiptunomaticGeneration(
       wasmScriptHref,
       fileName: file.name,
       buffer: buf,
+      mode: options?.mode ?? 'chiptune',
     };
     try {
       w.postMessage(msg, [buf]);

@@ -81,6 +81,10 @@ export interface WasmSampleGeneratorLike {
   free(): void;
 }
 
+export interface WasmSampleGeneratorStatics {
+  withMetadata(metadata: { free(): void }, sampleRateHz: number): WasmSampleGeneratorLike;
+}
+
 export interface WasmIterMixLike {
   generateMix(sample: WasmSampleLike): WasmMixLike;
   free(): void;
@@ -105,7 +109,7 @@ export function forEachMixedPcmSample(
   readerStatic: WasmSongNoteReaderStatics,
   metadataView: WasmMetadataBorrow,
   rawInput: Uint8Array,
-  SampleGeneratorCtor: new (hz: number) => WasmSampleGeneratorLike,
+  SampleGeneratorStatics: WasmSampleGeneratorStatics,
   IterMixCtor: new () => WasmIterMixLike,
   sampleHz: number,
   drumGen: DrumSampleGeneratorLike | undefined,
@@ -117,7 +121,7 @@ export function forEachMixedPcmSample(
 
   try {
     reader = readerStatic.withMetadata(metadataView);
-    sampleGen = new SampleGeneratorCtor(sampleHz);
+    sampleGen = SampleGeneratorStatics.withMetadata(metadataView, sampleHz);
     mixer = new IterMixCtor();
 
     let sliceStart = 0;
@@ -175,7 +179,7 @@ export function pcm16SamplesFromIncrementalPlan(
   metadataView: WasmMetadataBorrow,
   rawInput: Uint8Array,
   sampleHz: number,
-  SampleGeneratorCtor: new (hz: number) => WasmSampleGeneratorLike,
+  SampleGeneratorStatics: WasmSampleGeneratorStatics,
   IterMixCtor: new () => WasmIterMixLike,
   drumGen: DrumSampleGeneratorLike | undefined,
 ): Int16Array {
@@ -204,7 +208,7 @@ export function pcm16SamplesFromIncrementalPlan(
     readerStatic,
     metadataView,
     rawInput,
-    SampleGeneratorCtor,
+    SampleGeneratorStatics,
     IterMixCtor,
     sampleHz,
     drumGen,
@@ -223,7 +227,7 @@ export function streamPcmChunksFromIncrementalPlan(
   metadataView: WasmMetadataBorrow,
   rawInput: Uint8Array,
   sampleHz: number,
-  SampleGeneratorCtor: new (hz: number) => WasmSampleGeneratorLike,
+  SampleGeneratorStatics: WasmSampleGeneratorStatics,
   IterMixCtor: new () => WasmIterMixLike,
   drumGen: DrumSampleGeneratorLike | undefined,
   maxSamplesBeforeFlush: number,
@@ -247,7 +251,7 @@ export function streamPcmChunksFromIncrementalPlan(
     readerStatic,
     metadataView,
     rawInput,
-    SampleGeneratorCtor,
+    SampleGeneratorStatics,
     IterMixCtor,
     sampleHz,
     drumGen,

@@ -39,18 +39,17 @@ jobs:
         run: sudo apt-get install -y libasound2 libasound2t64 2>/dev/null || true
 
       - name: Collect CLI help text
-        id: cli-help
         run: |
           chmod +x dist-cli/chiptunomatic-x86_64-unknown-linux-gnu
           HELP=$(dist-cli/chiptunomatic-x86_64-unknown-linux-gnu --help 2>&1 || true)
           {
-            echo "text<<EOF"
+            echo "NEXT_PUBLIC_CLI_HELP<<EOF"
             echo "$HELP"
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          } >> "$GITHUB_ENV"
 
       - name: Debug CLI help output
-        run: echo "${{ steps.cli-help.outputs.text }}"
+        run: echo "$NEXT_PUBLIC_CLI_HELP"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -70,7 +69,7 @@ jobs:
           GITHUB_PAGES: "true"
           NEXT_PUBLIC_GITHUB_REPO_URL: https://github.com/${{ github.repository }}
           NEXT_PUBLIC_GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
-          NEXT_PUBLIC_CLI_HELP: ${{ steps.cli-help.outputs.text }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

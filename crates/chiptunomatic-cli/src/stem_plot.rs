@@ -2,8 +2,9 @@
 
 use chiptunomatic::Sample;
 
-/// Rolling waveform buffers for realtime stem visualization (square, triangle, noise).
+/// Rolling waveform buffers for realtime stem visualization (voice, square, triangle, noise).
 pub(crate) struct StemPlotBuffer {
+    voice: Vec<f32>,
     square: Vec<f32>,
     triangle: Vec<f32>,
     noise: Vec<f32>,
@@ -13,6 +14,7 @@ pub(crate) struct StemPlotBuffer {
 impl StemPlotBuffer {
     pub(crate) fn new(cap_samples: usize) -> Self {
         Self {
+            voice: Vec::new(),
             square: Vec::new(),
             triangle: Vec::new(),
             noise: Vec::new(),
@@ -21,6 +23,7 @@ impl StemPlotBuffer {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.voice.clear();
         self.square.clear();
         self.triangle.clear();
         self.noise.clear();
@@ -31,6 +34,7 @@ impl StemPlotBuffer {
             return;
         }
         for s in samples {
+            self.voice.push(s.song.voice.value);
             self.square.push(s.song.square.value);
             self.triangle.push(s.song.triangle.value);
             self.noise.push(s.drum);
@@ -41,10 +45,15 @@ impl StemPlotBuffer {
     fn trim(&mut self) {
         let excess = self.square.len().saturating_sub(self.cap_samples);
         if excess > 0 {
+            self.voice.drain(..excess);
             self.square.drain(..excess);
             self.triangle.drain(..excess);
             self.noise.drain(..excess);
         }
+    }
+
+    pub(crate) fn voice(&self) -> &[f32] {
+        &self.voice
     }
 
     pub(crate) fn square(&self) -> &[f32] {
@@ -59,6 +68,9 @@ impl StemPlotBuffer {
         &self.noise
     }
 
+    pub(crate) fn voice_peak(&self) -> f32 {
+        recent_peak(&self.voice, self.peak_window())
+    }
     pub(crate) fn square_peak(&self) -> f32 {
         recent_peak(&self.square, self.peak_window())
     }

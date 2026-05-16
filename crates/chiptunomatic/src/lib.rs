@@ -23,20 +23,23 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(feature = "arpeggio")]
+mod arpeggio;
+mod chiptunomatic;
 pub mod constants;
 mod drum;
 mod metadata;
 mod mix;
 mod note;
+pub mod plugin;
 mod song;
 pub mod synth;
-#[cfg(feature = "wav")]
-mod wav;
 
+#[cfg(feature = "arpeggio")]
+pub use arpeggio::*;
+pub use chiptunomatic::*;
 pub use drum::*;
 pub use metadata::*;
 pub use mix::*;
 pub use note::*;
 pub use song::*;
-#[cfg(feature = "wav")]
-pub use wav::*;

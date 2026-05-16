@@ -1,15 +1,16 @@
 //! Incremental [`SongNote`] construction: feed bytes as they arrive, poll for generated note events.
 
 use alloc::collections::vec_deque::VecDeque;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-use crate::constants::{
-    BASS_BASE, CHORD_BEATS, DURATIONS, HARMONY_BASE, MELODY_BASE, PENTATONIC_MINOR,
-};
 use crate::{
-    song::{Note, SampleStem, SquareNote, TriangleNote},
-    SongMetadata, StemSample,
+    constants::{BASS_BASE, CHORD_BEATS, DURATIONS, HARMONY_BASE, MELODY_BASE},
+    plugin::Plugin,
 };
+use crate::{song::Note, SongMetadata};
+#[cfg(feature = "arpeggio")]
+use crate::{ArpeggioConfig, ArpeggioNoteReader};
 
 /// Note for the melody
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -19,9 +20,6 @@ pub struct MelodyNote {
     pub duration: f64,
     pub degree: usize,
     pub octave: i32,
-    /// [`ByteStream`] position before reading the first melody byte (b1) for this note;
-    /// the second byte is always at offset `stream_offset_b1 + 1` in stream order.
-    /// Map to file indices with `% data.len()` for wraparound.
     pub byte_index: u64,
 }
 
@@ -39,51 +37,11 @@ impl Note for MelodyNote {
     }
 }
 
-impl SampleStem for MelodyNote {
-    fn sample_square(&self, sample_rate: u32) -> Vec<StemSample> {
-        if self.duration <= 0.0 {
-            return Vec::new();
-        }
-
-        // Sample the melody note first
-        let mut melody_samples = SquareNote {
-            midi: self.midi,
-            duration: self.duration,
-            amp: 0.28,
-            duty: 0.5,
-            byte_index: self.byte_index,
-        }
-        .sample_square(sample_rate);
-
-        // Sample the harmony note
-        let harmony_samples = SquareNote {
-            midi: self.harmony_midi,
-            duration: self.duration,
-            amp: 0.18,
-            duty: 0.25,
-            byte_index: self.byte_index,
-        }
-        .sample_square(sample_rate);
-
-        for i in 0..melody_samples.len() {
-            melody_samples[i].value += harmony_samples[i].value;
-        }
-
-        melody_samples
-    }
-
-    fn sample_triangle(&self, _sample_rate: u32) -> Vec<StemSample> {
-        Default::default()
-    }
-}
-
 /// Note for the bass
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct BassNote {
     pub midi: f64,
     pub duration: f64,
-    /// [`ByteStream`] position before reading the bass control byte for this half-note step.
-    /// Map to file indices with `% data.len()` for wraparound.
     pub byte_index: u64,
 }
 
@@ -101,21 +59,6 @@ impl Note for BassNote {
     }
 }
 
-impl SampleStem for BassNote {
-    fn sample_square(&self, _sample_rate: u32) -> Vec<StemSample> {
-        Default::default()
-    }
-
-    fn sample_triangle(&self, sample_rate: u32) -> Vec<StemSample> {
-        TriangleNote {
-            midi: self.midi,
-            duration: self.duration,
-            byte_index: self.byte_index,
-        }
-        .sample_triangle(sample_rate)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SongNote {
     Melody(MelodyNote),
@@ -125,22 +68,6 @@ pub enum SongNote {
 impl Default for SongNote {
     fn default() -> Self {
         Self::Melody(Default::default())
-    }
-}
-
-impl SampleStem for SongNote {
-    fn sample_square(&self, sample_rate: u32) -> Vec<StemSample> {
-        match self {
-            SongNote::Melody(note) => note.sample_square(sample_rate),
-            SongNote::Bass(note) => note.sample_square(sample_rate),
-        }
-    }
-
-    fn sample_triangle(&self, sample_rate: u32) -> Vec<StemSample> {
-        match self {
-            SongNote::Melody(note) => note.sample_triangle(sample_rate),
-            SongNote::Bass(note) => note.sample_triangle(sample_rate),
-        }
     }
 }
 
@@ -169,10 +96,40 @@ impl Default for MelodyWalkState {
     }
 }
 
+pub trait ReadSongNote {
+    fn with_capacity(self, capacity: usize) -> Self;
+    fn with_buffer(self, buffer: &[u8]) -> Self;
+    // Get the song metadata
+    fn metadata(&self) -> &SongMetadata;
+    fn plugin(&self) -> &Rc<dyn Plugin>;
+    // Add a single byte to the buffer
+    fn push(&mut self, byte: u8);
+    // Add bytes to the buffer
+    fn extend(&mut self, bytes: &[u8]);
+    // Capacity of the byte buffer
+    fn capacity(&self) -> usize;
+    // Length of the byte buffer
+    fn len(&self) -> usize;
+    // If the byte buffer is empty
+    fn is_empty(&self) -> bool;
+    // Position in the byte buffer
+    fn position(&self) -> u64;
+    fn melody_time(&self) -> f64;
+    fn bass_time(&self) -> f64;
+    // Read the next note from the byte buffer, returning None if the
+    // buffer is empty
+    fn read_note(&mut self) -> Option<SongNote>;
+    // Read all notes from the byte buffer
+    fn read_notes(&mut self) -> Vec<SongNote>;
+    // Read n notes from the byte buffer
+    fn read_notes_buf(&mut self, notes: &mut [SongNote]) -> usize;
+}
+
 /// Drives interleaved melody/bass generation from a growable byte stream (see [`ByteBufferStream`]).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SongNoteReader {
-    metadata: SongMetadata,
+    pub(crate) metadata: SongMetadata,
+    pub(crate) plugin: Rc<dyn Plugin>,
     // Input byte buffer
     buffer: VecDeque<u8>,
     // Buffer position
@@ -190,12 +147,12 @@ pub struct SongNoteReader {
 }
 
 impl SongNoteReader {
-    pub fn new(metadata: SongMetadata) -> Self {
+    pub fn new(metadata: SongMetadata, plugin: Rc<dyn Plugin>) -> Self {
         let half = metadata.timing.beat_duration * 2.0;
-
         Self {
             metadata,
-            buffer: Default::default(),
+            plugin,
+            buffer: VecDeque::with_capacity(1),
             position: 0,
             state: SongNoteReaderState::MelodyUpperByte,
             melody_upper_byte: 0,
@@ -207,122 +164,9 @@ impl SongNoteReader {
         }
     }
 
-    pub fn with_capacity(self, capacity: usize) -> Self {
-        Self {
-            buffer: VecDeque::with_capacity(capacity),
-            ..self
-        }
-    }
-
-    pub fn with_buffer(mut self, buffer: &[u8]) -> Self {
-        self.extend(buffer);
-        self
-    }
-
-    // Add a single byte to the buffer
-    pub fn push(&mut self, byte: u8) {
-        self.buffer.push_back(byte);
-    }
-
-    // Add bytes to the buffer
-    pub fn extend(&mut self, bytes: &[u8]) {
-        self.buffer.extend(bytes);
-    }
-
-    // Capacity of the byte buffer
-    pub fn capacity(&self) -> usize {
-        self.buffer.capacity()
-    }
-
-    // Length of the byte buffer
-    pub fn len(&self) -> usize {
-        self.buffer.len()
-    }
-
-    // If the byte buffer is empty
-    pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
-    }
-
-    // Position in the byte buffer
-    pub const fn position(&self) -> u64 {
-        self.position
-    }
-
-    pub const fn melody_time(&self) -> f64 {
-        self.melody_time
-    }
-
-    pub const fn bass_time(&self) -> f64 {
-        self.bass_time
-    }
-
-    // Read the next note from the byte buffer, returning None if the
-    // buffer is empty
-    pub fn read_note(&mut self) -> Option<SongNote> {
-        loop {
-            let Some(byte) = self.buffer.pop_front() else {
-                return None;
-            };
-
-            match self.state {
-                SongNoteReaderState::MelodyUpperByte => {
-                    self.melody_upper_byte = byte;
-                    self.position += 1;
-                    self.state = SongNoteReaderState::MelodyLowerByte;
-                }
-                SongNoteReaderState::MelodyLowerByte => {
-                    // Generate the melody note with 2 bytes
-                    let melody = self.melody_note(self.melody_upper_byte, byte);
-
-                    // Advance the melody time
-                    self.melody_time += melody.duration;
-
-                    self.position += 1;
-                    self.state = SongNoteReaderState::BassByte;
-                    return Some(SongNote::Melody(melody));
-                }
-                SongNoteReaderState::BassByte => {
-                    // Generate the bass note
-                    let bass = self.bass_note(byte);
-
-                    // Advance the bass time
-                    self.bass_time += self.half;
-                    self.bass_step += 1;
-
-                    self.position += 1;
-                    self.state = SongNoteReaderState::MelodyUpperByte;
-                    return Some(SongNote::Bass(bass));
-                }
-            }
-        }
-    }
-
-    // Read all notes from the byte buffer
-    pub fn read_notes(&mut self) -> Vec<SongNote> {
-        let mut notes = Vec::new();
-
-        loop {
-            notes.push(match self.read_note() {
-                None => return notes,
-                Some(n) => n,
-            });
-        }
-    }
-
-    // Read n notes from the byte buffer
-    pub fn read_notes_buf(&mut self, notes: &mut [SongNote]) -> usize {
-        let mut notes_written = 0;
-        let limit = notes.len();
-        while notes_written < limit {
-            notes[notes_written] = match self.read_note() {
-                None => return notes_written,
-                Some(n) => n,
-            };
-            notes_written += 1;
-        }
-
-        notes_written
+    #[cfg(feature = "arpeggio")]
+    pub fn with_arpeggio(self, config: ArpeggioConfig) -> ArpeggioNoteReader<SongNoteReader> {
+        ArpeggioNoteReader::new(self, config)
     }
 
     /// Generate the duration of a note from a byte
@@ -333,8 +177,7 @@ impl SongNoteReader {
 
     /// One melodic note from a pair of bytes
     fn melody_note(&mut self, upper_byte: u8, lower_byte: u8) -> MelodyNote {
-        // Generate the melody note
-        let scale = PENTATONIC_MINOR;
+        let scale: &[u8] = self.plugin.scale();
         let chord_duration = CHORD_BEATS as f64 * self.metadata.timing.beat_duration;
 
         let duration = self.bytes_to_duration(lower_byte);
@@ -392,7 +235,6 @@ impl SongNoteReader {
         midi = midi.max(21.0).min(108.0);
 
         // Generate the harmony note
-        let scale = PENTATONIC_MINOR;
         let harm_degree = (self.melody_state.degree as usize).saturating_sub(1);
         let mut harmony_midi = HARMONY_BASE
             + self.metadata.root_semitone as f64
@@ -412,8 +254,7 @@ impl SongNoteReader {
 
     /// One bass half-step from a byte
     fn bass_note(&self, b: u8) -> BassNote {
-        let scale = PENTATONIC_MINOR;
-
+        let scale = self.plugin.scale();
         let chord_idx = (self.bass_time / self.metadata.timing.beat_duration / CHORD_BEATS as f64)
             as usize
             % self.metadata.chord_progression.len();
@@ -446,64 +287,204 @@ impl SongNoteReader {
     }
 }
 
+impl ReadSongNote for SongNoteReader {
+    fn with_capacity(self, capacity: usize) -> Self {
+        Self {
+            buffer: VecDeque::with_capacity(capacity),
+            ..self
+        }
+    }
+
+    fn with_buffer(mut self, buffer: &[u8]) -> Self {
+        self.extend(buffer);
+        self
+    }
+
+    fn metadata(&self) -> &SongMetadata {
+        &self.metadata
+    }
+
+    fn plugin(&self) -> &Rc<dyn Plugin> {
+        &self.plugin
+    }
+
+    // Add a single byte to the buffer
+    fn push(&mut self, byte: u8) {
+        self.buffer.push_back(byte);
+    }
+
+    // Add bytes to the buffer
+    fn extend(&mut self, bytes: &[u8]) {
+        self.buffer.extend(bytes);
+    }
+
+    // Capacity of the byte buffer
+    fn capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    // Length of the byte buffer
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    // If the byte buffer is empty
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    // Position in the byte buffer
+    fn position(&self) -> u64 {
+        self.position
+    }
+
+    fn melody_time(&self) -> f64 {
+        self.melody_time
+    }
+
+    fn bass_time(&self) -> f64 {
+        self.bass_time
+    }
+
+    // Read the next note from the byte buffer, returning None if the
+    // buffer is empty
+    fn read_note(&mut self) -> Option<SongNote> {
+        loop {
+            let Some(byte) = self.buffer.pop_front() else {
+                return None;
+            };
+
+            match self.state {
+                SongNoteReaderState::MelodyUpperByte => {
+                    self.melody_upper_byte = byte;
+                    self.position += 1;
+                    self.state = SongNoteReaderState::MelodyLowerByte;
+                }
+                SongNoteReaderState::MelodyLowerByte => {
+                    // Generate the melody note with 2 bytes
+                    let melody = self.melody_note(self.melody_upper_byte, byte);
+
+                    // Advance the melody time
+                    self.melody_time += melody.duration;
+
+                    self.position += 1;
+                    self.state = SongNoteReaderState::BassByte;
+                    return Some(SongNote::Melody(melody));
+                }
+                SongNoteReaderState::BassByte => {
+                    // Generate the bass note
+                    let bass = self.bass_note(byte);
+
+                    // Advance the bass time
+                    self.bass_time += self.half;
+                    self.bass_step += 1;
+
+                    self.position += 1;
+                    self.state = SongNoteReaderState::MelodyUpperByte;
+                    return Some(SongNote::Bass(bass));
+                }
+            }
+        }
+    }
+
+    // Read all notes from the byte buffer
+    fn read_notes(&mut self) -> Vec<SongNote> {
+        let mut notes = Vec::new();
+
+        loop {
+            notes.push(match self.read_note() {
+                None => return notes,
+                Some(n) => n,
+            });
+        }
+    }
+
+    // Read n notes from the byte buffer
+    fn read_notes_buf(&mut self, notes: &mut [SongNote]) -> usize {
+        let mut notes_written = 0;
+        let limit = notes.len();
+        while notes_written < limit {
+            notes[notes_written] = match self.read_note() {
+                None => return notes_written,
+                Some(n) => n,
+            };
+            notes_written += 1;
+        }
+
+        notes_written
+    }
+}
+
 #[cfg(feature = "std")]
 mod iter {
     use std::io::{Bytes, Read};
 
-    use crate::{SampleSongNotes, SongMetadata, SongNote, SongNoteReader};
+    #[cfg(feature = "arpeggio")]
+    use crate::{ArpeggioConfig, ArpeggioNoteReader};
+    use crate::{ReadSongNote, SampleSongNotes, SongNote};
 
     /// Yield one note at a time from a byte stream
-    pub struct ReadSongNotes<R: Read> {
-        inner: Bytes<R>,
-        song_plan_generator: SongNoteReader,
+    #[derive(Debug)]
+    pub struct ReadSongNotes<R: Read, RSN: ReadSongNote> {
+        reader: Bytes<R>,
+        song_note_reader: RSN,
         eof: bool,
     }
 
-    impl<R: Read> ReadSongNotes<R> {
-        // Read in chunks of 1024 bytes
-        const DEFAULT_CAPACITY: usize = 1024;
-
-        pub fn new(metadata: SongMetadata, inner: R) -> Self {
+    impl<R: Read, RSN: ReadSongNote> ReadSongNotes<R, RSN> {
+        pub fn new(reader: R, song_note_reader: RSN) -> Self {
             Self {
-                inner: inner.bytes(),
-                song_plan_generator: SongNoteReader::new(metadata)
-                    .with_capacity(Self::DEFAULT_CAPACITY),
+                reader: reader.bytes(),
+                song_note_reader,
                 eof: false,
             }
         }
 
         pub fn with_capacity(self, capacity: usize) -> Self {
             Self {
-                song_plan_generator: self.song_plan_generator.with_capacity(capacity),
+                song_note_reader: self.song_note_reader.with_capacity(capacity),
                 ..self
             }
         }
 
+        #[cfg(feature = "arpeggio")]
+        pub fn with_arpeggio(
+            self,
+            config: ArpeggioConfig,
+        ) -> ReadSongNotes<R, ArpeggioNoteReader<RSN>> {
+            ReadSongNotes {
+                reader: self.reader,
+                song_note_reader: ArpeggioNoteReader::new(self.song_note_reader, config),
+                eof: false,
+            }
+        }
+
         pub fn samples(self) -> SampleSongNotes<Self> {
-            SampleSongNotes::new(self)
+            let plugin = self.song_note_reader.plugin().clone();
+            SampleSongNotes::new(self, plugin)
         }
     }
 
-    impl<R: Read> Iterator for ReadSongNotes<R> {
+    impl<R: Read, RSN: ReadSongNote> Iterator for ReadSongNotes<R, RSN> {
         type Item = std::io::Result<SongNote>;
 
         fn next(&mut self) -> Option<Self::Item> {
             loop {
-                if !self.eof && self.song_plan_generator.is_empty() {
+                if !self.eof && self.song_note_reader.is_empty() {
                     // Fill the byte buffer if empty
-                    for _ in 0..self.song_plan_generator.capacity() {
-                        match self.inner.next() {
+                    for _ in 0..self.song_note_reader.capacity() {
+                        match self.reader.next() {
                             None => {
                                 self.eof = true;
                                 break;
                             }
                             Some(Err(e)) => return Some(Err(e)),
-                            Some(Ok(b)) => self.song_plan_generator.push(b),
+                            Some(Ok(b)) => self.song_note_reader.push(b),
                         }
                     }
                 }
 
-                match self.song_plan_generator.read_note() {
+                match self.song_note_reader.read_note() {
                     // If EOF and None, then there is no remaining notes
                     None if self.eof => return None,
                     // If not EOF and None, loop to fill the byte buffer

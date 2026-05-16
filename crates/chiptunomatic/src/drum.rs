@@ -1,12 +1,10 @@
 use alloc::collections::VecDeque;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
-#[cfg(feature = "std")]
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 
 use crate::{
     constants::{HAT_PATTERNS, KICK_PATTERNS, SAMPLE_RATE, SNARE_PATTERNS},
-    synth::{envelope, noise_burst, square},
+    plugin::{Plugin, Random, SampleStepConfig},
     SongMetadata,
 };
 
@@ -91,44 +89,32 @@ impl Iterator for Steps {
 pub type DrumSample = f32;
 
 /// Generate drum samples from the steps
-pub struct DrumSampleGenerator<R: Rng + ?Sized> {
+pub struct DrumSampleGenerator {
     metadata: SongMetadata,
+    plugin: Rc<dyn Plugin>,
     sample_rate: f64,
-    rng: R,
+    random: Rc<dyn Random>,
 }
 
-impl<R: Rng + SeedableRng + ?Sized> DrumSampleGenerator<R> {
-    pub fn new(metadata: SongMetadata) -> Self {
+impl DrumSampleGenerator {
+    pub fn new(metadata: SongMetadata, plugin: Rc<dyn Plugin>, random: Rc<dyn Random>) -> Self {
         Self {
-            rng: R::seed_from_u64(metadata.rng_seed),
             metadata,
+            plugin,
             sample_rate: SAMPLE_RATE as f64,
+            random,
         }
     }
-}
 
-impl<R: Rng + ?Sized> DrumSampleGenerator<R>
-where
-    Self: Sized,
-{
     pub fn with_sample_rate(self, sample_rate: u32) -> Self {
         Self {
             sample_rate: sample_rate as f64,
             ..self
         }
     }
-}
-
-impl<R: Rng + Sized> DrumSampleGenerator<R>
-where
-    Self: Sized,
-{
-    pub fn with_rng(self, rng: R) -> Self {
-        Self { rng, ..self }
-    }
 
     // Iterate the samples infinitely
-    pub fn samples(self) -> SampleDrumSteps<R> {
+    pub fn samples(self) -> SampleDrumSteps {
         SampleDrumSteps {
             drum_pattern: self.metadata.drum_pattern.clone(),
             sample_generator: self,
@@ -136,75 +122,37 @@ where
             samples: Default::default(),
         }
     }
-}
 
-impl<R: Rng + ?Sized> DrumSampleGenerator<R> {
     /// Sample a step
     pub fn sample_step(&mut self, step: DrumStep) -> Vec<DrumSample> {
-        let pat = (step.offset % 16) as usize;
+        let pattern = (step.offset % 16) as usize;
         let step_duration = self.metadata.timing.sixteenth;
-        let color = self.metadata.seed[pat % 8];
+        let color = self.metadata.seed[pattern % 8];
 
         // Create enough empty samples in case there is no drum at this step
         let total_samples = (self.sample_rate * self.metadata.timing.sixteenth).floor() as usize;
         let mut samples = Vec::with_capacity(total_samples);
         samples.resize_with(total_samples, Default::default);
 
-        // Generate the kick
-        if step.kick {
-            let freq = 60.0 + f64::from(color % 12);
-            let dur_sec = (0.12_f64).min(step_duration * 2.0);
-            let raw = square(self.sample_rate, freq, dur_sec, 0.4, 0.2);
-            Self::overlay_samples(
-                &envelope(self.sample_rate, &raw, 0.002, 0.09, 0.0, 0.01),
-                &mut samples,
-            );
-        }
-
-        // Generate the snare
-        if step.snare {
-            let accent = pat == 4 || pat == 12;
-            let amp = if accent { 0.22 } else { 0.09 };
-            let dur_n = (0.07_f64).min(step_duration);
-            let raw = noise_burst(self.sample_rate, &mut self.rng, dur_n, amp);
-            Self::overlay_samples(
-                &envelope(self.sample_rate, &raw, 0.001, 0.055, 0.0, 0.015),
-                &mut samples,
-            );
-        }
-
-        // Generate the hat
-        if step.hat {
-            Self::overlay_samples(
-                &if step.open_hat {
-                    let d = (0.09_f64).min(step_duration * 3.0);
-                    let s = noise_burst(self.sample_rate, &mut self.rng, d, 0.12);
-                    envelope(self.sample_rate, &s, 0.001, 0.07, 0.25, 0.03)
-                } else {
-                    let amp = if pat % 2 == 0 { 0.10 } else { 0.05 };
-                    let d = (0.018_f64).min(step_duration * 0.45);
-                    noise_burst(self.sample_rate, &mut self.rng, d, amp)
-                },
-                &mut samples,
-            );
-        }
+        self.plugin.sample_step(
+            step,
+            SampleStepConfig {
+                sample_rate: self.sample_rate,
+                step_duration,
+                pattern,
+                color,
+                random: &self.random,
+            },
+            &mut samples,
+        );
 
         samples
-    }
-
-    fn overlay_samples(src: &Vec<DrumSample>, dst: &mut Vec<DrumSample>) {
-        for i in 0..dst.len().min(src.len()) {
-            dst[i] += src[i];
-        }
     }
 }
 
 /// Iterator the sample the drum steps
-pub struct SampleDrumSteps<R: Rng + ?Sized>
-where
-    DrumSampleGenerator<R>: Sized,
-{
-    sample_generator: DrumSampleGenerator<R>,
+pub struct SampleDrumSteps {
+    sample_generator: DrumSampleGenerator,
     drum_pattern: DrumPattern,
     // Current drum step
     step: u64,
@@ -212,21 +160,23 @@ where
     samples: VecDeque<DrumSample>,
 }
 
-impl<R: Rng + SeedableRng + ?Sized> SampleDrumSteps<R> {
-    pub fn new(metadata: SongMetadata) -> Self {
+impl SampleDrumSteps {
+    pub fn new(metadata: SongMetadata, plugin: Rc<dyn Plugin>, random: Rc<dyn Random>) -> Self {
+        Self::from_generator(
+            metadata.clone(),
+            DrumSampleGenerator::new(metadata, plugin, random),
+        )
+    }
+
+    pub fn from_generator(metadata: SongMetadata, sample_generator: DrumSampleGenerator) -> Self {
         Self {
             drum_pattern: metadata.drum_pattern.clone(),
-            sample_generator: DrumSampleGenerator::new(metadata),
+            sample_generator,
             step: 0,
             samples: Default::default(),
         }
     }
-}
 
-impl<R: Rng + ?Sized> SampleDrumSteps<R>
-where
-    DrumSampleGenerator<R>: Sized,
-{
     pub fn with_sample_rate(self, sample_rate: u32) -> Self {
         Self {
             sample_generator: self.sample_generator.with_sample_rate(sample_rate),
@@ -235,10 +185,7 @@ where
     }
 }
 
-impl<R: Rng + ?Sized> Iterator for SampleDrumSteps<R>
-where
-    DrumSampleGenerator<R>: Sized,
-{
+impl Iterator for SampleDrumSteps {
     type Item = DrumSample;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -257,7 +204,3 @@ where
         }
     }
 }
-
-// Generate drum samples using StdRng
-#[cfg(feature = "std")]
-pub type StdDrumSampleGenerator = DrumSampleGenerator<StdRng>;

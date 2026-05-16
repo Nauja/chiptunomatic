@@ -11,3 +11,4 @@ target/
 *.gif
 demo.yml
 *.wav
+memory/

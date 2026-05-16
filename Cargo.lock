@@ -259,9 +259,10 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chiptunomatic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "dyn-clone",
  "getrandom 0.2.17",
  "hound",
  "md5",
@@ -272,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "chiptunomatic-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chiptunomatic",
@@ -281,6 +282,7 @@ dependencies = [
  "crossterm",
  "hound",
  "indicatif",
+ "rand",
  "ratatui",
  "ratatui-explorer",
  "rodio",
@@ -291,6 +293,7 @@ name = "chiptunomatic-wasm"
 version = "0.1.0"
 dependencies = [
  "chiptunomatic",
+ "rand",
  "wasm-bindgen",
 ]
 
@@ -627,6 +630,12 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "educe"

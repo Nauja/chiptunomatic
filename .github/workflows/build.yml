@@ -2,9 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
   pull_request:
-    branches: [main, master]
   workflow_call:
 
 env:
@@ -47,6 +45,7 @@ jobs:
           cp target/release/chiptunomatic dist/chiptunomatic-x86_64-unknown-linux-gnu
 
       - uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           name: cli-linux
           path: dist/chiptunomatic-x86_64-unknown-linux-gnu
@@ -72,6 +71,7 @@ jobs:
           cp target/release/chiptunomatic.exe dist/chiptunomatic-x86_64-pc-windows-msvc.exe
 
       - uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           name: cli-windows
           path: dist/chiptunomatic-x86_64-pc-windows-msvc.exe
@@ -103,6 +103,7 @@ jobs:
             --out-name chiptunomatic_wasm
 
       - uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           name: chiptunomatic-wasm
           path: dist/
