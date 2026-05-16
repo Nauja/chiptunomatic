@@ -74,15 +74,15 @@ impl Plugin for RockPlugin {
         }
         let dur = total as f64 / sr;
         // Overdriven triangle bass — punchy with harmonic grit
-        let raw = triangle(sr, midi_to_hz(note.midi), dur, 0.45);
+        let raw = triangle(sr, midi_to_hz(note.midi), dur, 0.30);
         let driven: Vec<f32> = raw
             .iter()
             .map(|&s| {
-                let d = s * 1.8;
+                let d = s * 1.5;
                 d / (1.0 + d.abs())
             })
             .collect();
-        let with_env = envelope(sr, &driven, 0.002, 0.04, 0.75, 0.04);
+        let with_env = envelope(sr, &driven, 0.002, 0.04, 0.60, 0.04);
         (0..total.min(with_env.len()))
             .map(|i| StemSample {
                 value: with_env[i],
