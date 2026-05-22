@@ -21,6 +21,7 @@ pub struct StemsSample {
     pub square: StemSample,
     pub triangle: StemSample,
     pub noise: f32,
+    pub sfx: StemSample,
 }
 
 pub trait SampleStem {
@@ -154,6 +155,7 @@ pub struct Sampler {
     melody_notes: VecDeque<MelodyNote>,
     bass_notes: VecDeque<BassNote>,
     voice_samples: VecDeque<StemSample>,
+    sfx_samples: VecDeque<StemSample>,
     square_samples: VecDeque<StemSample>,
     triangle_samples: VecDeque<StemSample>,
 }
@@ -204,11 +206,13 @@ impl Sampler {
                 };
 
                 let voice = self.voice_samples.pop_front().unwrap_or_default();
+                let sfx = self.sfx_samples.pop_front().unwrap_or_default();
                 return Some(StemsSample {
                     voice,
                     square,
                     triangle,
                     noise: 0.0,
+                    sfx,
                 });
             }
 
@@ -223,6 +227,8 @@ impl Sampler {
                     .extend(plugin.sample_melody_note(note, sample_rate));
                 self.voice_samples
                     .extend(plugin.sample_voice_note(note, sample_rate));
+                self.sfx_samples
+                    .extend(plugin.sample_sfx_note(note, sample_rate));
             }
 
             // Sample the next bass note if any

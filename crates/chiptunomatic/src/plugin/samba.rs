@@ -80,9 +80,11 @@ impl Plugin for SambaPlugin {
         // Bright, articulated melody: FM 2:1, β=0.6 — crisp and reedy, sits clearly
         // above the drums without going metallic. Punchy envelope: fast attack,
         // short decay to a modest sustain so notes articulate crisply.
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.38, 2.0, 0.6);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.38, 2.0, 0.6);
         let mel = envelope(sr, &mel, 0.002, 0.15, 0.25, 0.06);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.16, 2.0, 0.6);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.16, 2.0, 0.6);
         let harm = envelope(sr, &harm, 0.002, 0.15, 0.25, 0.06);
         (0..total)
             .map(|i| StemSample {

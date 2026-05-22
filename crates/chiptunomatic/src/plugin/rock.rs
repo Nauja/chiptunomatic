@@ -1,11 +1,76 @@
-use crate::plugin::{Plugin, String, Vec};
+use crate::plugin::{Plugin, SampleStepConfig, SectionDef, StemMask, String, Vec};
 use crate::synth::{midi_to_hz, sine, triangle};
 use crate::{
-    plugin::{overlay_samples, SampleStepConfig},
+    plugin::overlay_samples,
     synth::{envelope, noise_burst, square},
     DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
+
+// intro → verse → pre-chorus → chorus → verse → pre-chorus → chorus → bridge → chorus → outro
+// Cycle = 16+32+16+32+32+16+32+16+32+16 = 240 beats. At 130 BPM ≈ 110 s before repeating.
+const ROCK_SECTIONS: [SectionDef; 10] = [
+    // Intro: guitar + bass, no drums, no voice
+    SectionDef {
+        beats: 16,
+        stems: StemMask { voice: false, square: true, triangle: true, noise: false, sfx: false },
+        silence_after: 0.8,
+    },
+    // Verse: guitar + bass + drums, no voice
+    SectionDef {
+        beats: 32,
+        stems: StemMask { voice: false, square: true, triangle: true, noise: true, sfx: false },
+        silence_after: 0.0,
+    },
+    // Pre-chorus: voice enters, all stems
+    SectionDef {
+        beats: 16,
+        stems: StemMask::ALL,
+        silence_after: 0.0,
+    },
+    // Chorus: all stems
+    SectionDef {
+        beats: 32,
+        stems: StemMask::ALL,
+        silence_after: 0.5,
+    },
+    // Verse 2
+    SectionDef {
+        beats: 32,
+        stems: StemMask { voice: false, square: true, triangle: true, noise: true, sfx: false },
+        silence_after: 0.0,
+    },
+    // Pre-chorus 2
+    SectionDef {
+        beats: 16,
+        stems: StemMask::ALL,
+        silence_after: 0.0,
+    },
+    // Chorus 2
+    SectionDef {
+        beats: 32,
+        stems: StemMask::ALL,
+        silence_after: 0.5,
+    },
+    // Bridge: bass + drums only
+    SectionDef {
+        beats: 16,
+        stems: StemMask { voice: false, square: false, triangle: true, noise: true, sfx: false },
+        silence_after: 0.8,
+    },
+    // Chorus 3
+    SectionDef {
+        beats: 32,
+        stems: StemMask::ALL,
+        silence_after: 0.0,
+    },
+    // Outro: guitar + bass, no drums, no voice
+    SectionDef {
+        beats: 16,
+        stems: StemMask { voice: false, square: true, triangle: true, noise: false, sfx: false },
+        silence_after: 1.5,
+    },
+];
 
 pub const ROCK_BPM_BASE: i32 = 130;
 pub const ROCK_BPM_VARIATION: i32 = 30; // (seed >> 8) % 30 → 0..29, centre at 15 → 115–144 BPM
@@ -50,8 +115,9 @@ impl Plugin for RockPlugin {
         }
         let dur = total as f64 / sr;
         // Power chord: root + perfect fifth (7 semitones), soft-clipped for grit
-        let root = square(sr, midi_to_hz(note.midi), dur, 0.30, 0.5);
-        let fifth = square(sr, midi_to_hz(note.midi + 7.0), dur, 0.20, 0.5);
+        let midi = (note.midi - 12.0).max(21.0);
+        let root = square(sr, midi_to_hz(midi), dur, 0.30, 0.5);
+        let fifth = square(sr, midi_to_hz(midi + 7.0), dur, 0.20, 0.5);
         let root = envelope(sr, &root, 0.002, 0.05, 0.80, 0.04);
         let fifth = envelope(sr, &fifth, 0.002, 0.05, 0.80, 0.04);
         (0..total)
@@ -140,5 +206,9 @@ impl Plugin for RockPlugin {
                 samples,
             );
         }
+    }
+
+    fn section_defs(&self) -> &'static [SectionDef] {
+        &ROCK_SECTIONS
     }
 }

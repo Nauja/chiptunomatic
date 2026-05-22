@@ -155,6 +155,7 @@ fn main() -> anyhow::Result<()> {
             muted: args.noise_muted,
             solo: args.noise_solo,
         },
+        sfx_output: StemOutput::default(),
     });
 
     match (args.input.as_deref(), args.output.as_deref(), args.info) {

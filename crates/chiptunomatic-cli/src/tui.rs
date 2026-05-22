@@ -11,6 +11,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use chiptunomatic::constants::{NOTE_NAMES, SAMPLE_RATE};
 use chiptunomatic::{Chiptunomatic, MixerConfig, Sample, SongMetadata};
+use cli_log::info;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -75,7 +76,7 @@ fn volume_bar(level: f32, height: u16) -> Paragraph<'static> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusedButton {
-    Muted(u8), // stem: 0=voice 1=square 2=triangle 3=noise
+    Muted(u8), // stem: 0=voice 1=square 2=triangle 3=noise 4=sfx
     Solo(u8),
 }
 
@@ -83,7 +84,7 @@ impl FocusedButton {
     fn next(self) -> Self {
         match self {
             Self::Muted(s) => Self::Solo(s),
-            Self::Solo(3) => Self::Muted(0),
+            Self::Solo(4) => Self::Muted(0),
             Self::Solo(s) => Self::Muted(s + 1),
         }
     }
@@ -91,7 +92,7 @@ impl FocusedButton {
     fn prev(self) -> Self {
         match self {
             Self::Solo(s) => Self::Muted(s),
-            Self::Muted(0) => Self::Solo(3),
+            Self::Muted(0) => Self::Solo(4),
             Self::Muted(s) => Self::Solo(s - 1),
         }
     }
@@ -292,6 +293,7 @@ fn spawn_audio_worker(
                 }
 
                 if outcome == SynthCompletion::Finished {
+                    info!("Music finished");
                     playback_progress.mark_complete();
                     // Ensure remaining queued audio plays out even if paused at track end.
                     is_paused.store(false, Ordering::SeqCst);
@@ -637,45 +639,64 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
             let px = (stems_area.width.saturating_sub(6) / 2) as usize;
             let px = px.max(16);
 
-            let (vc_pts, sq_pts, tr_pts, nz_pts, vc_vol, sq_vol, tr_vol, nz_vol) = stem_plot
-                .lock()
-                .map(|g| {
-                    let mv = mixer_config.effective_master_volume();
-                    (
-                        waveform_points(g.voice(), px),
-                        waveform_points(g.square(), px),
-                        waveform_points(g.triangle(), px),
-                        waveform_points(g.noise(), px),
-                        (g.voice_peak() * 3.0 * mv * mixer_config.effective_voice_volume())
+            let (vc_pts, sq_pts, tr_pts, nz_pts, sfx_pts, vc_vol, sq_vol, tr_vol, nz_vol, sfx_vol) =
+                stem_plot
+                    .lock()
+                    .map(|g| {
+                        let mv = mixer_config.effective_master_volume();
+                        (
+                            waveform_points(g.voice(), px),
+                            waveform_points(g.square(), px),
+                            waveform_points(g.triangle(), px),
+                            waveform_points(g.noise(), px),
+                            waveform_points(g.sfx(), px),
+                            (g.voice_peak() * 3.0 * mv * mixer_config.effective_voice_volume())
+                                .min(1.0),
+                            (g.square_peak() * 3.0 * mv * mixer_config.effective_square_volume())
+                                .min(1.0),
+                            (g.triangle_peak()
+                                * 3.0
+                                * mv
+                                * mixer_config.effective_triangle_volume())
                             .min(1.0),
-                        (g.square_peak() * 3.0 * mv * mixer_config.effective_square_volume())
-                            .min(1.0),
-                        (g.triangle_peak() * 3.0 * mv * mixer_config.effective_triangle_volume())
-                            .min(1.0),
-                        (g.noise_peak() * 3.0 * mv * mixer_config.effective_noise_volume())
-                            .min(1.0),
-                    )
-                })
-                .unwrap_or_else(|_| {
-                    (
-                        vec![(0.0, 0.0), (1.0, 0.0)],
-                        vec![(0.0, 0.0), (1.0, 0.0)],
-                        vec![(0.0, 0.0), (1.0, 0.0)],
-                        vec![(0.0, 0.0), (1.0, 0.0)],
-                        0.0,
-                        0.0,
-                        0.0,
-                        0.0,
-                    )
-                });
+                            (g.noise_peak() * 3.0 * mv * mixer_config.effective_noise_volume())
+                                .min(1.0),
+                            (g.sfx_peak() * 3.0 * mv * mixer_config.effective_sfx_volume())
+                                .min(1.0),
+                        )
+                    })
+                    .unwrap_or_else(|_| {
+                        (
+                            vec![(0.0, 0.0), (1.0, 0.0)],
+                            vec![(0.0, 0.0), (1.0, 0.0)],
+                            vec![(0.0, 0.0), (1.0, 0.0)],
+                            vec![(0.0, 0.0), (1.0, 0.0)],
+                            vec![(0.0, 0.0), (1.0, 0.0)],
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                        )
+                    });
 
-            // 2×2 grid: voice (TL) | square (TR) / triangle (BL) | noise (BR)
+            // Layout: square occupies full top-left; top-right is voice alone or voice|sfx.
+            // Bottom row: triangle (BL) | noise (BR).
+            let show_sfx = instance.has_sfx();
             let [top_row, bottom_row] =
                 Layout::vertical([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
                     .areas(stems_area);
-            let [vc_r, sq_r] =
+            let [sq_r, top_right_r] =
                 Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
                     .areas(top_row);
+            let (vc_r, sfx_r) = if show_sfx {
+                let [v, s] =
+                    Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                        .areas(top_right_r);
+                (v, s)
+            } else {
+                (top_right_r, Rect::default())
+            };
             let [tr_r, nz_r] =
                 Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
                     .areas(bottom_row);
@@ -704,6 +725,7 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
             };
 
             let (vc_bar_r, vc_mute_r, vc_solo_r) = make_stem_rects(vc_r);
+            let (sfx_bar_r, sfx_mute_r, sfx_solo_r) = make_stem_rects(sfx_r);
             let (sq_bar_r, sq_mute_r, sq_solo_r) = make_stem_rects(sq_r);
             let (tr_bar_r, tr_mute_r, tr_solo_r) = make_stem_rects(tr_r);
             let (nz_bar_r, nz_mute_r, nz_solo_r) = make_stem_rects(nz_r);
@@ -755,6 +777,29 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                 ),
                 vc_solo_r,
             );
+
+            if show_sfx {
+                f.render_widget(stem_line_chart("sfx", &sfx_pts, Color::LightYellow), sfx_r);
+                f.render_widget(volume_bar(sfx_vol, sfx_bar_r.height), sfx_bar_r);
+                f.render_widget(
+                    button_widget(
+                        "[M]",
+                        mixer_config.sfx_output.muted,
+                        focused_button == Some(FocusedButton::Muted(4)),
+                        Color::Red,
+                    ),
+                    sfx_mute_r,
+                );
+                f.render_widget(
+                    button_widget(
+                        "[S]",
+                        mixer_config.sfx_output.solo,
+                        focused_button == Some(FocusedButton::Solo(4)),
+                        Color::Yellow,
+                    ),
+                    sfx_solo_r,
+                );
+            }
 
             f.render_widget(stem_line_chart("square", &sq_pts, Color::Cyan), sq_r);
             f.render_widget(volume_bar(sq_vol, sq_bar_r.height), sq_bar_r);
@@ -852,7 +897,7 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                         }
                         KeyCode::BackTab => {
                             focused_button =
-                                Some(focused_button.map_or(FocusedButton::Solo(3), |b| b.prev()));
+                                Some(focused_button.map_or(FocusedButton::Solo(4), |b| b.prev()));
                             continue;
                         }
                         KeyCode::Char(' ') if focused_button.is_some() => {
@@ -874,6 +919,10 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                                         mixer_config.noise_output.muted =
                                             !mixer_config.noise_output.muted
                                     }
+                                    FocusedButton::Muted(4) => {
+                                        mixer_config.sfx_output.muted =
+                                            !mixer_config.sfx_output.muted
+                                    }
                                     FocusedButton::Solo(0) => {
                                         mixer_config.voice_output.solo =
                                             !mixer_config.voice_output.solo
@@ -889,6 +938,9 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                                     FocusedButton::Solo(3) => {
                                         mixer_config.noise_output.solo =
                                             !mixer_config.noise_output.solo
+                                    }
+                                    FocusedButton::Solo(4) => {
+                                        mixer_config.sfx_output.solo = !mixer_config.sfx_output.solo
                                     }
                                     _ => {}
                                 }

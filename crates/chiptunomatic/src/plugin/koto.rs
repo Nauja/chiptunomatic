@@ -59,8 +59,10 @@ impl Plugin for KotoPlugin {
         let dur = total as f64 / sr;
         // Karplus-Strong plucked koto string. Natural decay: high notes fade quickly,
         // low notes ring longer — matching real koto string physics.
-        let mel = karplus_strong(sr, midi_to_hz(note.midi), dur, 0.42);
-        let harm = karplus_strong(sr, midi_to_hz(note.harmony_midi), dur, 0.20);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = karplus_strong(sr, midi_to_hz(midi), dur, 0.42);
+        let harm = karplus_strong(sr, midi_to_hz(harmony_midi), dur, 0.20);
         // 10 ms linear fade-out to avoid a click at the note boundary.
         let fade_len = ((sr * 0.010) as usize).min(total);
         (0..total)

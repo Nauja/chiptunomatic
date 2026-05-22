@@ -30,6 +30,43 @@ pub struct SampleStepConfig<'a> {
     pub random: &'a mut Box<dyn Random>,
 }
 
+/// Controls which stems are audible in a song section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StemMask {
+    pub voice: bool,
+    pub square: bool,
+    pub triangle: bool,
+    pub noise: bool,
+    pub sfx: bool,
+}
+
+impl StemMask {
+    pub const ALL: Self = Self {
+        voice: true,
+        square: true,
+        triangle: true,
+        noise: true,
+        sfx: true,
+    };
+}
+
+impl Default for StemMask {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+/// One entry in a plugin's repeating song-structure table.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct SectionDef {
+    /// Length of this section in beats.
+    pub beats: u64,
+    /// Which stems are audible during this section.
+    pub stems: StemMask,
+    /// Seconds of silence inserted after this section ends.
+    pub silence_after: f64,
+}
+
 pub trait Plugin: Debug + DynClone + Send {
     /// Return the mode name
     fn mode(&self) -> &'static str;
@@ -48,6 +85,18 @@ pub trait Plugin: Debug + DynClone + Send {
     fn sample_melody_note(&self, note: MelodyNote, sample_rate: u32) -> Vec<StemSample>;
     /// Sample the triangle wave of a bass note
     fn sample_bass_note(&self, note: BassNote, sample_rate: u32) -> Vec<StemSample>;
+
+    /// Whether this plugin produces SFX on the sfx stem.
+    /// Defaults to false; override to true in plugins that implement `sample_sfx_note`.
+    fn has_sfx(&self) -> bool {
+        false
+    }
+
+    /// Sample an SFX note for a dedicated effects stem.
+    /// The default returns silence; plugins override for style-specific SFX.
+    fn sample_sfx_note(&self, _note: MelodyNote, _sample_rate: u32) -> Vec<StemSample> {
+        Vec::new()
+    }
 
     /// Sample a voice note (humming/singing) following the melody.
     /// The default produces a gentle vibrato sine that blends across all modes;
@@ -82,6 +131,18 @@ pub trait Plugin: Debug + DynClone + Send {
     /// Plugins override this to return sparser or style-specific patterns.
     fn drum_pattern_from_seed(&self, seed: &[u8; 8]) -> DrumPattern {
         DrumPattern::from_seed(seed)
+    }
+
+    /// Return the repeating section table for this plugin.
+    /// An empty slice (the default) disables structured sections.
+    fn section_defs(&self) -> &'static [SectionDef] {
+        &[]
+    }
+
+    /// Generate the section table from the song seed.
+    /// Override for seed-driven variation; default converts the static `section_defs()` slice.
+    fn section_defs_from_seed(&self, _seed: u32) -> Vec<SectionDef> {
+        self.section_defs().to_vec()
     }
 }
 

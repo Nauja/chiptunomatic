@@ -4,6 +4,7 @@ use core::fmt::Display;
 
 use alloc::{string::String, vec::Vec};
 
+use crate::plugin::SectionDef;
 use crate::DrumPattern;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -37,10 +38,12 @@ pub struct SongMetadata {
     pub total_beats: u64,
     pub total_duration: f64,
     pub total_duration_str: String,
+    pub beat_skip_bytes: u64,
     pub data_byte_len: u64,
     pub data_byte_len_str: String,
     pub drum_pattern: DrumPattern,
     pub drum_seed: [u8; 8],
+    pub sections: Vec<SectionDef>,
 }
 
 impl Display for SongMetadata {

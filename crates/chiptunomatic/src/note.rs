@@ -77,6 +77,7 @@ enum SongNoteReaderState {
     MelodyUpperByte,
     MelodyLowerByte,
     BassByte,
+    Skip(u64),
 }
 
 /// Mutable melodic walk state across [`melody_note_from_bytes`] calls (matches sequential generator).
@@ -179,8 +180,21 @@ impl NoteGenerator {
                     self.bass_step += 1;
 
                     self.position += 1;
-                    self.state = SongNoteReaderState::MelodyUpperByte;
+                    self.state = if metadata.beat_skip_bytes == 0 {
+                        SongNoteReaderState::MelodyUpperByte
+                    } else {
+                        SongNoteReaderState::Skip(metadata.beat_skip_bytes)
+                    };
                     return Some(Note::Bass(bass));
+                }
+                // Skip n consecutive bytes to produce less beats for bigger files
+                SongNoteReaderState::Skip(n) => {
+                    self.position += 1;
+                    self.state = if n > 1 {
+                        SongNoteReaderState::Skip(n - 1)
+                    } else {
+                        SongNoteReaderState::MelodyUpperByte
+                    }
                 }
             }
         }
@@ -241,10 +255,25 @@ impl NoteGenerator {
             % metadata.chord_progression.len();
         let chord_deg = metadata.chord_progression[chord_idx];
 
+        let phrase_duration = chord_duration * metadata.chord_progression.len() as f64;
         let time_left_in_chord = chord_duration - (self.melody_time % chord_duration);
+        let time_left_in_phrase = phrase_duration - (self.melody_time % phrase_duration);
         if time_left_in_chord < metadata.timing.beat_duration * 1.5 {
+            // Chord boundary: snap to chord root.
             self.melody_state.degree = chord_deg as isize;
             self.melody_state.octave = 0;
+        } else if time_left_in_phrase < metadata.timing.beat_duration * 2.0 {
+            // Phrase end: steer degree back toward the chord root so each
+            // phrase resolves before the next one begins.
+            let target = chord_deg as isize;
+            let step = (target - self.melody_state.degree).signum();
+            self.melody_state.direction = if step != 0 {
+                step
+            } else {
+                self.melody_state.direction
+            };
+            self.melody_state.degree =
+                (self.melody_state.degree + step).clamp(0, scale.len() as isize - 1);
         } else {
             let step_choice = (upper_byte % 8) as u32;
             let delta = if step_choice < 4 {

@@ -93,8 +93,9 @@ impl Plugin for MetalPlugin {
         }
         let dur = total as f64 / sr;
         // Power chord: root + perfect fifth, hard-clipped for distortion character.
-        let root = square(sr, midi_to_hz(note.midi), dur, 0.25, 0.5);
-        let fifth = square(sr, midi_to_hz(note.midi + 7.0), dur, 0.18, 0.5);
+        let midi = (note.midi - 12.0).max(21.0);
+        let root = square(sr, midi_to_hz(midi), dur, 0.25, 0.5);
+        let fifth = square(sr, midi_to_hz(midi + 7.0), dur, 0.18, 0.5);
         let root = envelope(sr, &root, 0.001, 0.012, 0.92, 0.015);
         let fifth = envelope(sr, &fifth, 0.001, 0.012, 0.92, 0.015);
         (0..total)

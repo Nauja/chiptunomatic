@@ -97,9 +97,11 @@ impl Plugin for RapPlugin {
         }
         let dur = total as f64 / sr;
         // Warm FM piano/Rhodes — mod ratio 1.5, index 1.0 for mid-range presence
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.28, 1.5, 1.0);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.28, 1.5, 1.0);
         let mel = envelope(sr, &mel, 0.004, 0.18, 0.45, 0.08);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.12, 1.5, 1.0);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.12, 1.5, 1.0);
         let harm = envelope(sr, &harm, 0.004, 0.18, 0.45, 0.08);
         (0..total)
             .map(|i| StemSample {

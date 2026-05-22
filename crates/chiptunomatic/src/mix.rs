@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use getset::{Getters, MutGetters, Setters, WithSetters};
 
-use crate::StemsSample;
+use crate::{plugin::StemMask, StemsSample};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct Sample {
@@ -49,6 +49,7 @@ pub struct MixerConfig {
     pub square_output: StemOutput,
     pub triangle_output: StemOutput,
     pub noise_output: StemOutput,
+    pub sfx_output: StemOutput,
 }
 
 impl MixerConfig {
@@ -58,6 +59,7 @@ impl MixerConfig {
             || self.square_output.solo
             || self.triangle_output.solo
             || self.noise_output.solo
+            || self.sfx_output.solo
     }
 
     pub fn effective_master_volume(&self) -> f32 {
@@ -99,6 +101,14 @@ impl MixerConfig {
             self.noise_output.volume
         }
     }
+
+    pub fn effective_sfx_volume(&self) -> f32 {
+        if self.sfx_output.muted || (self.any_solo() && !self.sfx_output.solo) {
+            0.0
+        } else {
+            self.sfx_output.volume
+        }
+    }
 }
 
 /// Same per-sample peak-normalization behaviour as [`IterMix`], for feeding [`Sample`] values one-by-one from JS/workers.
@@ -128,20 +138,56 @@ impl Mixer {
     }
 
     // Mix one sample
-    pub fn mix_sample(&mut self, mut sample: StemsSample) -> Sample {
+    pub fn mix_sample(&mut self, mut sample: StemsSample, mask: &StemMask) -> Sample {
+        // Mix as if no mask to compute the correct peak
         sample.square.value *= self.config.effective_square_volume();
         sample.triangle.value *= self.config.effective_triangle_volume();
         sample.voice.value *= self.config.effective_voice_volume();
         sample.noise *= self.config.effective_noise_volume();
+        sample.sfx.value *= self.config.effective_sfx_volume();
 
-        let mut mixed =
-            sample.voice.value + sample.square.value + sample.triangle.value + sample.noise;
+        let mixed = sample.voice.value
+            + sample.square.value
+            + sample.triangle.value
+            + sample.noise
+            + sample.sfx.value;
 
         self.peak = self.peak.max(mixed.abs());
+
+        // Mute the stems masked out
+        if !mask.voice {
+            sample.voice.value = 0.0;
+        }
+
+        if !mask.square {
+            sample.square.value = 0.0
+        }
+
+        if !mask.triangle {
+            sample.triangle.value = 0.0
+        }
+
+        if !mask.noise {
+            sample.noise = 0.0
+        }
+
+        if !mask.sfx {
+            sample.sfx.value = 0.0;
+        }
+
+        // Mix again
+        let mut mixed = sample.voice.value
+            + sample.square.value
+            + sample.triangle.value
+            + sample.noise
+            + sample.sfx.value;
+
+        // Apply the peak
         if self.peak > 0.0 {
             mixed /= self.peak;
         }
         mixed *= 0.9 * self.config.effective_master_volume();
+
         Sample {
             stems: sample,
             value: mixed,
@@ -149,7 +195,7 @@ impl Mixer {
     }
 
     // Mix multiple samples
-    pub fn mix_samples(&mut self, samples: &[StemsSample]) -> Vec<Sample> {
-        samples.iter().map(|s| self.mix_sample(*s)).collect()
+    pub fn mix_samples(&mut self, samples: &[StemsSample], mask: &StemMask) -> Vec<Sample> {
+        samples.iter().map(|s| self.mix_sample(*s, mask)).collect()
     }
 }

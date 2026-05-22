@@ -61,12 +61,13 @@ impl Plugin for ToyPlugin {
         // Kalimba tine: FM with a 3:1 modulator ratio and β=1.2 produces the slight
         // inharmonicity of struck metal — bright without being a bell. Fast 1ms attack,
         // 220ms decay to a 8% sustain so the note has a clear "tink" then fades.
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.55, 3.0, 1.2);
+        let midi = (note.midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.55, 3.0, 1.2);
         let mel = envelope(sr, &mel, 0.001, 0.22, 0.08, 0.10);
         // Octave shimmer: same FM formula one octave up, much shorter decay so it
         // disappears in the first ~100ms and leaves the fundamental to ring alone —
         // exactly how a real kalimba tine behaves.
-        let shimmer = fm_sine(sr, midi_to_hz(note.midi + 12.0), dur, 0.28, 3.0, 1.2);
+        let shimmer = fm_sine(sr, midi_to_hz(midi + 12.0), dur, 0.28, 3.0, 1.2);
         let shimmer = envelope(sr, &shimmer, 0.001, 0.10, 0.02, 0.06);
         (0..total)
             .map(|i| StemSample {

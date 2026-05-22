@@ -126,7 +126,7 @@ The TUI shows real-time waveform charts for all four stems in a 2×2 grid (voice
 
 | | Chiptune | Lofi | Rock | Metal | Persian | Trap | Rap | Medieval | Koto | Toy | Samba |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| **BPM** | 100–140 | 74–82 | 115–145 | 140–175 | 72–90 | 125–154 | 84–99 | 80–100 | 80–99 | 95–114 | 100–115 |
+| **BPM** | 150–179 | 74–82 | 115–145 | 140–175 | 72–90 | 125–154 | 84–99 | 80–100 | 80–99 | 95–114 | 100–115 |
 | **Scale** | Pentatonic minor | Pentatonic minor | Pentatonic minor | Pentatonic minor | Persian (b2, M3, P4, P5) | Pentatonic minor | Pentatonic minor | Dorian pentatonic | Hirajoshi pentatonic | Major pentatonic | Major pentatonic |
 | **Melody** | Square wave | Two-voice FM Rhodes (tine attack + warm body) + brass pad | Power chord square + soft clip | Power chord square + hard clip | FM ney flute (1:1, β=0.35) + octave whistle | FM bell (4:1, β=2.5) | FM piano (1.5:1, β=1.0) | Additive recorder (3 partials) + KS lute | Karplus-Strong string | FM tine (3:1, β=1.2) + octave shimmer | FM reedy (2:1, β=0.6) |
 | **Bass** | Triangle wave | 3-string KS guitar (root + P5 + octave) + warm sine | Overdriven triangle | Saturated square, very heavy | Karplus-Strong setar/oud | 808 pitch-sweep sine | Clean punchy sine | Open-fifth organum drone (root + P5) | Karplus-Strong string | Gentle sine | Punchy plucked sine |
@@ -134,6 +134,48 @@ The TUI shows real-time waveform charts for all four stems in a 2×2 grid (voice
 | **Snare** | Noise burst | Noise + 180 Hz body, soft | Loud noise + 200 Hz body | Explosive noise + 220 Hz body | Noise + 380 Hz body, short (tombak tak) | Layered double-hit clap | Noise + 220 Hz body ("bap") | Noise + 100 Hz body (frame drum) + tambourine jingles | Noise + 200 Hz body, very soft | Noise + 150 Hz body, barely audible | Dense noise + 250 Hz body (caixa) |
 | **Hi-hat** | Moderate noise | Very quiet, short | Crisp, loud | Crisp, aggressive (8ths or 16ths) | Very sparse, restrained (finger cymbals) | Tight, metallic | Moderate, unhurried | 4-partial inharmonic bell (cymbala) + metallic transient | Barely audible shimmer | Nearly silent tick | Teleco-teco syncopation, noise + tok tone (tamborim) |
 | **Chords** | Pentatonic minor | Jazz-flavoured minor | I–V–IV rock patterns | Dark minor loops (i–m3–P5, i–m7) | Modal drone (i–M3–i–P4, i–b2–i–M3) | Dark minor loops | Soul/funk minor loops | Root–P4–P5 modal | Hirajoshi m3/P5/m6 loops | Major pentatonic bright loops | Major pentatonic circular loops |
+
+### Chiptune mode
+
+Chiptune mode emulates the sound of a late-1980s game console — NES-style pulse waves, a triangle bass, noise percussion, and short video-game SFX interjections. It is the default mode.
+
+**Tempo and chords.** BPM ranges from 150 to 179 (base 165, ±14 from the seed). Chord progressions are drawn from a shared pentatonic-minor table.
+
+**Melody — NES pulse waves.** The melody combines two square-wave voices:
+- *Lead* — amplitude 0.28, duty cycle tied to the scale degree (0.5 / 0.25 / 0.5 / 0.125 cycling through the four NES duty positions), pitched one octave below the raw MIDI value for a warmer register.
+- *Harmony* — amplitude 0.18, duty cycle offset from the lead (0.25 / 0.5 / 0.125 / 0.5) so the two voices never share the same waveform shape at the same time.
+
+**Bass.** Triangle wave at the raw MIDI pitch, ADSR-shaped for a smooth attack and decay.
+
+**Drums.** All three voices use a lightweight square/noise synthesis:
+- *Kick* — short square wave (60–72 Hz depending on the seed's colour byte), hard-decay envelope, ~120 ms.
+- *Snare* — noise burst; backbeats (steps 4 and 12) hit at 0.22 amplitude, off-beats at 0.09.
+- *Hi-hat* — closed: 18 ms noise at alternating amplitude (0.10 / 0.05). Open: 90 ms noise with a gentle sustain.
+
+**SFX stem.** Roughly once every 24 melody notes the SFX stem fires a short video-game sound effect. Five types cycle deterministically from the seed:
+
+| # | Name | Synthesis | Duration |
+|---|---|---|---|
+| 0 | Coin | Two percussive pings (C6 → G6), zero sustain | ~95 ms |
+| 1 | Jump | Linear upward pitch glide 180 → 650 Hz, narrow duty | ~180 ms |
+| 2 | Power-up | 10-note arpeggio sweep C3 → C6 (18 ms per step) | ~180 ms |
+| 3 | Laser | Exponential downward sweep 1800 → 80 Hz, 10 % duty | ~220 ms |
+| 4 | 1-UP | E5–G5–E6–C6–D6–G6 jingle, short-short-long rhythm | ~480 ms |
+
+**Song structure.** The section layout is generated from the seed rather than being fixed, producing ~1 500 distinct song shapes while keeping the same high-level arc. The structure is always: intro → verse → pre-chorus → chorus → verse → pre-chorus → chorus → [bridge →] chorus → outro.
+
+Each structural parameter is derived from a dedicated bit range of the root seed (bits 0–3 are the root note; bits 8–12 are the BPM offset):
+
+| Seed bits | Parameter | Choices |
+|---|---|---|
+| 16–17 | Verse length | 24 beats (25 %), 28 beats (25 %), 32 beats (50 %) |
+| 18 | Intro / outro length | 16 beats (50 %) or 8 beats (50 %) |
+| 19 | Pre-chorus length | 16 beats (50 %) or 12 beats (50 %) |
+| 20 | Chorus length | 32 beats (50 %) or 28 beats (50 %) |
+| 21–22 | Silence after each chorus | 0.3 / 0.5 / 0.7 / 1.0 s (25 % each) |
+| 23–24 | Voice active in verse | Yes (~25 %, both bits set) or No (~75 %) |
+| 25 | Bridge present | Yes (50 %) or No (50 %) |
+| 26 | Bridge length | 16 beats (50 %) or 12 beats (50 %) |
 
 ### Lofi mode
 

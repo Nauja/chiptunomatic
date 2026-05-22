@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt::Debug;
+use std::println;
 #[cfg(feature = "std")]
 use std::{io::Read, path::Path};
 
@@ -14,7 +15,7 @@ use crate::plugin::rock::RockPlugin;
 use crate::plugin::samba::SambaPlugin;
 use crate::plugin::toy::ToyPlugin;
 use crate::plugin::trap::TrapPlugin;
-use crate::plugin::Plugin;
+use crate::plugin::{Plugin, StemMask};
 use crate::random::{NoRandom, Random};
 use crate::{Arpeggiator, Mixer, NoteGenerator, Sample, SampleDrum, Sampler};
 use crate::{SongMetadata, Timing};
@@ -83,6 +84,9 @@ pub struct Chiptunomatic {
     mixer: Mixer,
     #[getset(set = "pub", set_with = "pub")]
     random: Box<dyn Random>,
+    silence_remaining: usize,
+    section_beat_cursor: u64,
+    section_idx: usize,
 }
 
 impl Consume for Chiptunomatic {
@@ -123,6 +127,9 @@ impl Default for Chiptunomatic {
             drum_samples: Default::default(),
             mixer: Default::default(),
             random: Box::new(NoRandom::default()),
+            silence_remaining: 0,
+            section_beat_cursor: 0,
+            section_idx: 0,
         };
 
         chiptunomatic.plugins.push(plugin);
@@ -173,6 +180,10 @@ impl Chiptunomatic {
         self.plugin.mode_string()
     }
 
+    pub fn has_sfx(&self) -> bool {
+        self.plugin.has_sfx()
+    }
+
     /// Set the selected mode
     pub fn set_mode(&mut self, mode: &String) -> Result<(), ChiptunomaticError> {
         if let Some(plugin) = self.plugins.iter().find(|p| p.mode() == mode) {
@@ -201,6 +212,9 @@ impl Chiptunomatic {
         self.sampler = Default::default();
         self.arpeggiator.reset();
         self.mixer.reset();
+        self.silence_remaining = 0;
+        self.section_beat_cursor = 0;
+        self.section_idx = 0;
 
         // Also reset the RNG
         self.random.set_seed(self.metadata.rng_seed);
@@ -247,8 +261,32 @@ impl Chiptunomatic {
         let root = (root_seed % 12) as u8;
         let bpm = self.plugin.tempo_from_seed(root_seed);
         let timing = Timing::from_bpm(bpm);
+
+        // How many beats are really in the file
         let total_beats = data_byte_len / 3;
-        let total_duration = (total_beats as f64) * timing.beat_duration;
+
+        let sections = self.plugin.section_defs_from_seed(root_seed);
+
+        // How many beats we want to not make the music too long for big files
+        let desired_total_beats = if !sections.is_empty() {
+            sections.iter().map(|s| s.beats).sum::<u64>()
+        } else {
+            (150.0 / timing.beat_duration) as u64
+        }
+        .min(total_beats);
+
+        // If we want less beats that the file can produce, then we must read more
+        // than 3 bytes per beats in order to consume the file faster and produce
+        // less beats
+        let desired_beat_byte_len = if desired_total_beats < total_beats {
+            let desired_data_byte_len = desired_total_beats * 3;
+            ((data_byte_len as f64 / desired_data_byte_len as f64) * 3.0) as u64
+        } else {
+            3
+        }
+        .max(3);
+
+        let desired_total_duration = (desired_total_beats as f64) * timing.beat_duration;
         let chord_progression = self.plugin.chord_progression_from_seed(chord_seed);
         let drum_pattern = self.plugin.drum_pattern_from_seed(&drum_pattern_seed);
         let chord_description = Self::build_chord_description(root, &chord_progression);
@@ -258,9 +296,13 @@ impl Chiptunomatic {
             rng_seed,
             root_semitone: root,
             bpm,
-            total_beats,
-            total_duration,
-            total_duration_str: Self::format_duration(total_duration),
+            total_beats: desired_total_beats,
+            total_duration: desired_total_duration,
+            total_duration_str: Self::format_duration(desired_total_duration),
+            // For total_beats, a beat would be 3 bytes. But for desired_total_beats,
+            // it would be more than 3 bytes. Chiptunomatic is configured to discard
+            // the extra bytes of each beat for now so the music has the desired length
+            beat_skip_bytes: (desired_beat_byte_len - 3),
             chord_progression,
             chord_description,
             timing,
@@ -268,6 +310,7 @@ impl Chiptunomatic {
             data_byte_len_str: Self::format_data_byte_size(data_byte_len),
             drum_pattern,
             drum_seed: drum_pattern_seed,
+            sections,
         })
     }
 
@@ -450,6 +493,12 @@ impl Iterator for Chiptunomatic {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            // Drain silence between sections before doing anything else
+            if self.silence_remaining > 0 {
+                self.silence_remaining -= 1;
+                return Some(Sample::default());
+            }
+
             // Drain available samples first
             if let Some(mut sample) = self.sampler.sample(&self.plugin, self.sample_rate) {
                 // Add drums
@@ -460,14 +509,37 @@ impl Iterator for Chiptunomatic {
                     &mut self.random,
                 );
 
+                // Mute stems that are inactive in the current section
+                let sections = self.metadata.sections.as_slice();
+                let mask = if sections.is_empty() {
+                    StemMask::ALL
+                } else {
+                    sections[self.section_idx % sections.len()].stems
+                };
+
                 // Mix
-                return Some(self.mixer.mix_sample(sample));
+                return Some(self.mixer.mix_sample(sample, &mask));
             }
 
             // Push the next note to generate new samples
             match self.note_generator.note(&self.metadata, &self.plugin) {
                 None => return None,
                 Some(note) => {
+                    // Check whether we've crossed into a new section
+                    let sections = self.metadata.sections.as_slice();
+                    if !sections.is_empty() {
+                        let current_beat = (self.note_generator.melody_time
+                            / self.metadata.timing.beat_duration)
+                            as u64;
+                        let idx = self.section_idx % sections.len();
+                        if current_beat >= self.section_beat_cursor + sections[idx].beats {
+                            self.silence_remaining =
+                                (sections[idx].silence_after * self.sample_rate as f64) as usize;
+                            self.section_beat_cursor += sections[idx].beats;
+                            self.section_idx += 1;
+                        }
+                    }
+
                     // Generate the arpeggios
                     let notes = self
                         .arpeggiator

@@ -87,9 +87,11 @@ impl Plugin for TrapPlugin {
         }
         let dur = total as f64 / sr;
         // Bell/pluck: FM with high mod ratio and index for metallic shimmer
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.25, 4.0, 2.5);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.25, 4.0, 2.5);
         let mel = envelope(sr, &mel, 0.002, 0.15, 0.10, 0.05);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.10, 4.0, 2.5);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.10, 4.0, 2.5);
         let harm = envelope(sr, &harm, 0.002, 0.15, 0.10, 0.05);
         (0..total)
             .map(|i| StemSample {
