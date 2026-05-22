@@ -20,6 +20,16 @@ The project is a Rust workspace with three crates and a Next.js web UI:
 | `chiptunomatic-cli` | Native CLI with interactive TUI and WAV export |
 | `chiptunomatic-wasm` | wasm-bindgen bindings for the browser |
 
+## Why
+
+Chiptunomatic is a long-standing personal project: generate procedural chiptune music directly from arbitrary files, with no manual composition involved. The original question was simple — given that every file is just a stream of bytes, how would an AI like Claude decide to map those bytes to music?
+
+The first results were exactly what you'd expect: a wall of essentially random notes with no structure, no rhythm, and no harmonic logic. From there the project was refined entirely through prompting — describing what was missing, explaining what "better" should sound like, and letting Claude propose and implement the changes. Chord progressions were added so notes relate to each other. Structured drum patterns replaced the noise. A classic song form (intro → verse → chorus → bridge → outro) gave each file a shape that feels like a real track rather than an accident. Synthesis was tuned mode by mode until each one had a recognisable character.
+
+The result is less "AI writes music" and more "AI and human iterate together on a rule system until the output is worth listening to" — which turned out to be the more interesting experiment.
+
+**Disclaimer.** The author knows nothing about music. All musical terminology, synthesis descriptions, mode breakdowns, and in-depth technical explanations in this README were written by Claude. If something sounds wrong to a musician, it probably is — but it was Claude's call, not mine.
+
 ## Demo
 
 The web app runs entirely in your browser — no file is ever uploaded. Drop any file, get a chiptune, download the WAV.
