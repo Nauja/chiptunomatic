@@ -27,73 +27,29 @@ export interface SongMetadataJs {
   free(): void;
 }
 
-/** Static `SongNoteReader.withMetadata` (wasm-pack `--target web`). */
-export interface ChiptuneSongNoteReaderHandle {
-  consumeInputBytes(data: Uint8Array): ChiptuneConsumeNotesOutcomeHandle;
+/** WASM `IncrementalSynthesizer` instance — feed raw bytes, receive back LE i16 PCM. */
+export interface IncrementalSynthesizerHandle {
+  /** Feed `data` bytes; returns LE i16 PCM bytes generated from them. */
+  consumeBytes(data: Uint8Array): Uint8Array;
+  setMasterVolume(volume: number): void;
+  setMasterMuted(muted: boolean): void;
+  setVoiceOutput(volume: number, muted: boolean, solo: boolean): void;
+  setSquareOutput(volume: number, muted: boolean, solo: boolean): void;
+  setTriangleOutput(volume: number, muted: boolean, solo: boolean): void;
+  setNoiseOutput(volume: number, muted: boolean, solo: boolean): void;
   free(): void;
 }
 
-/** Return value of [`ChiptuneSongNoteReaderHandle.consumeInputBytes`]. */
-export interface ChiptuneConsumeNotesOutcomeHandle {
-  readonly consumedByteCount: number;
-  readonly notes: ChiptunePlanNoteHandle[];
-  free(): void;
-}
-
-/** `PlanNoteWasm` backing object (owned by WASM). */
-export interface ChiptunePlanNoteHandle {
-  free(): void;
-}
-
-/** Wasm-pack glue shape for `SampleGenerator` instance. */
-export interface ChiptunomaticSampleGenerator {
-  samplesForPlanNote(note: ChiptunePlanNoteHandle): ChiptuneSampleHandle[];
-  free(): void;
-}
-
-/** Static side of `SampleGenerator` — created via `withMetadata`. */
-export interface ChiptunomaticSampleGeneratorStatics {
-  withMetadata(metadata: SongMetadataJs, sampleRateHz: number): ChiptunomaticSampleGenerator;
-}
-
-/** WASM `DrumSampleGenerator` instance — call `nextSample()` once per output audio sample. */
-export interface DrumSampleGeneratorHandle {
-  nextSample(): number;
-  free(): void;
-}
-
-/** Static side of `DrumSampleGenerator` — created via `withMetadata`. */
-export interface DrumSampleGeneratorStatics {
-  withMetadata(metadata: SongMetadataJs, sampleRateHz: number): DrumSampleGeneratorHandle;
-}
-
-/** `SampleWasm`; release after use. */
-export interface ChiptuneSampleHandle {
-  drum: number;
-  free(): void;
-}
-
-/** `MixWasm`; release after mixing. */
-export interface ChiptuneMixHandle {
-  readonly frequency: number;
-  free(): void;
-}
-
-/** Js name `IterMix` — wraps [`MixGenerator`]. */
-export interface ChiptunomaticIterMix {
-  generateMix(sample: ChiptuneSampleHandle): ChiptuneMixHandle;
-  free(): void;
+/** Static side of `IncrementalSynthesizer` — created via `withMetadata`. */
+export interface IncrementalSynthesizerStatics {
+  withMetadata(metadata: SongMetadataJs): IncrementalSynthesizerHandle;
 }
 
 /** Shape of wasm-pack `--target web` glue (`public/chiptunomatic-wasm/chiptunomatic_wasm.js`). */
 export interface ChiptunomaticWasmModule {
   default: (moduleOrPath?: unknown) => Promise<void>;
   chiptuneSampleRate(): number;
-  SongNoteReader: {
-    withMetadata(metadata: SongMetadataJs): ChiptuneSongNoteReaderHandle;
-  };
-  SampleGenerator: ChiptunomaticSampleGeneratorStatics;
-  IterMix: new () => ChiptunomaticIterMix;
+  IncrementalSynthesizer: IncrementalSynthesizerStatics;
   createSongMetadataFromString(
     name: string,
     dataByteLen: bigint,
@@ -103,7 +59,6 @@ export interface ChiptunomaticWasmModule {
     dataByteLen: bigint,
     mode: string,
   ): SongMetadataJs;
-  DrumSampleGenerator: DrumSampleGeneratorStatics;
   /** Returns comma-separated mode names. */
   musicModeNames(): string;
 }

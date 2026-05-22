@@ -48,222 +48,54 @@ export function concatenatePcmChunksToInt16(chunks: Uint8Array[]): Int16Array {
   );
 }
 
-function mixFrequencyToPcmSample(frequency: number): number {
-  return Math.max(-32768, Math.min(32767, Math.round(frequency * 32767.0)));
-}
-
-export interface WasmNoteLike {
+export interface IncrementalSynthesizerLike {
+  consumeBytes(data: Uint8Array): Uint8Array;
   free(): void;
 }
 
-export interface WasmSampleLike {
-  drum: number;
-  free(): void;
-}
-
-export interface DrumSampleGeneratorLike {
-  nextSample(): number;
-}
-
-export interface WasmMixLike {
-  readonly frequency: number;
-  free(): void;
-}
-
-export interface WasmConsumeNotesOutcomeLike {
-  readonly consumedByteCount: number;
-  readonly notes: WasmNoteLike[];
-  free(): void;
-}
-
-export interface WasmSampleGeneratorLike {
-  samplesForPlanNote(note: WasmNoteLike): WasmSampleLike[];
-  free(): void;
-}
-
-export interface WasmSampleGeneratorStatics {
-  withMetadata(metadata: { free(): void }, sampleRateHz: number): WasmSampleGeneratorLike;
-}
-
-export interface WasmIterMixLike {
-  generateMix(sample: WasmSampleLike): WasmMixLike;
-  free(): void;
-}
-
-export interface WasmSongNoteReaderLike {
-  consumeInputBytes(data: Uint8Array): WasmConsumeNotesOutcomeLike;
-  free(): void;
-}
-
-export interface WasmSongNoteReaderStatics {
-  withMetadata(metadata: { free(): void }): WasmSongNoteReaderLike;
-}
-
-/** Metadata view with wall‑clock length (for PCM preallocation). */
-export interface WasmMetadataBorrow {
-  readonly totalDuration: number;
-  free(): void;
-}
-
-export function forEachMixedPcmSample(
-  readerStatic: WasmSongNoteReaderStatics,
-  metadataView: WasmMetadataBorrow,
-  rawInput: Uint8Array,
-  SampleGeneratorStatics: WasmSampleGeneratorStatics,
-  IterMixCtor: new () => WasmIterMixLike,
-  sampleHz: number,
-  drumGen: DrumSampleGeneratorLike | undefined,
-  onSample: (pcmI16: number) => void,
-): void {
-  let reader: WasmSongNoteReaderLike | undefined;
-  let sampleGen: WasmSampleGeneratorLike | undefined;
-  let mixer: WasmIterMixLike | undefined;
-
-  try {
-    reader = readerStatic.withMetadata(metadataView);
-    sampleGen = SampleGeneratorStatics.withMetadata(metadataView, sampleHz);
-    mixer = new IterMixCtor();
-
-    let sliceStart = 0;
-
-    for (;;) {
-      const remainder = rawInput.subarray(sliceStart);
-      const outcome = reader.consumeInputBytes(remainder);
-      try {
-        const consumed = outcome.consumedByteCount;
-        const notes = outcome.notes;
-        sliceStart += consumed;
-
-        if (notes.length === 0 && consumed === 0) {
-          break;
-        }
-
-        for (let ni = 0; ni < notes.length; ni++) {
-          const note = notes[ni];
-          try {
-            const stems = sampleGen.samplesForPlanNote(note);
-            for (let si = 0; si < stems.length; si++) {
-              const s = stems[si];
-              try {
-                if (drumGen !== undefined) {
-                  s.drum = drumGen.nextSample();
-                }
-                const m = mixer.generateMix(s);
-                try {
-                  onSample(mixFrequencyToPcmSample(m.frequency));
-                } finally {
-                  m.free();
-                }
-              } finally {
-                s.free();
-              }
-            }
-          } finally {
-            note.free();
-          }
-        }
-      } finally {
-        outcome.free();
-      }
-    }
-  } finally {
-    reader?.free();
-    mixer?.free();
-    sampleGen?.free();
-  }
-}
-
-/** Collect all PCM into one buffer (growable heap). */
-export function pcm16SamplesFromIncrementalPlan(
-  readerStatic: WasmSongNoteReaderStatics,
-  metadataView: WasmMetadataBorrow,
-  rawInput: Uint8Array,
-  sampleHz: number,
-  SampleGeneratorStatics: WasmSampleGeneratorStatics,
-  IterMixCtor: new () => WasmIterMixLike,
-  drumGen: DrumSampleGeneratorLike | undefined,
-): Int16Array {
-  const totalDurSec = metadataView.totalDuration;
-  let pcmCap =
-    totalDurSec > 0 ? Math.ceil(totalDurSec * sampleHz + sampleHz / 10) : sampleHz * 8;
-
-  pcmCap = Math.max(sampleHz, pcmCap);
-
-  let pcm = new Int16Array(pcmCap);
-  let writeHead = 0;
-
-  const ensure = (extra: number) => {
-    while (writeHead + extra > pcm.length) {
-      let n = pcm.length * 2;
-      if (n < writeHead + extra) {
-        n = writeHead + extra + 8192;
-      }
-      const next = new Int16Array(n);
-      next.set(pcm.subarray(0, writeHead));
-      pcm = next;
-    }
-  };
-
-  forEachMixedPcmSample(
-    readerStatic,
-    metadataView,
-    rawInput,
-    SampleGeneratorStatics,
-    IterMixCtor,
-    sampleHz,
-    drumGen,
-    (sample) => {
-      ensure(1);
-      pcm[writeHead++] = sample;
-    },
-  );
-
-  return pcm.subarray(0, writeHead);
-}
-
-/** Stream PCM batches as transferable byte buffers (little‑endian mono i16). */
-export function streamPcmChunksFromIncrementalPlan(
-  readerStatic: WasmSongNoteReaderStatics,
-  metadataView: WasmMetadataBorrow,
-  rawInput: Uint8Array,
-  sampleHz: number,
-  SampleGeneratorStatics: WasmSampleGeneratorStatics,
-  IterMixCtor: new () => WasmIterMixLike,
-  drumGen: DrumSampleGeneratorLike | undefined,
+/**
+ * Stream PCM from an [`IncrementalSynthesizerLike`] as transferable byte buffers
+ * (little-endian mono i16). Input is fed in chunks of `inputChunkSize` bytes; PCM is flushed
+ * to `onChunk` whenever `maxSamplesBeforeFlush` samples have accumulated.
+ *
+ * Returns the total number of PCM samples produced.
+ */
+export function streamPcmChunksFromSynthesizer(
+  synth: IncrementalSynthesizerLike,
+  input: Uint8Array,
+  inputChunkSize: number,
   maxSamplesBeforeFlush: number,
   onChunk: (pcmBytesOwned: Uint8Array) => void,
 ): number {
-  const scratchCap = Math.max(256, maxSamplesBeforeFlush);
-  const scratch = new Int16Array(scratchCap);
-  let scratchUsed = 0;
+  const maxBytes = maxSamplesBeforeFlush * 2; // i16 = 2 bytes per sample
+  const parts: Uint8Array[] = [];
+  let bufferedBytes = 0;
   let totalSamples = 0;
 
   const flush = () => {
-    if (scratchUsed === 0) return;
-    const copy = scratch.slice(0, scratchUsed);
-    onChunk(
-      new Uint8Array(copy.buffer, copy.byteOffset, copy.byteLength),
-    );
-    scratchUsed = 0;
+    if (bufferedBytes === 0) return;
+    const merged = new Uint8Array(bufferedBytes);
+    let pos = 0;
+    for (const p of parts) {
+      merged.set(p, pos);
+      pos += p.length;
+    }
+    parts.length = 0;
+    bufferedBytes = 0;
+    onChunk(merged);
   };
 
-  forEachMixedPcmSample(
-    readerStatic,
-    metadataView,
-    rawInput,
-    SampleGeneratorStatics,
-    IterMixCtor,
-    sampleHz,
-    drumGen,
-    (sample) => {
-      scratch[scratchUsed++] = sample;
-      totalSamples++;
-      if (scratchUsed >= scratchCap) {
-        flush();
-      }
-    },
-  );
-
+  const chunkSize = Math.max(1, inputChunkSize);
+  for (let offset = 0; offset < input.length; offset += chunkSize) {
+    const slice = input.subarray(offset, Math.min(offset + chunkSize, input.length));
+    const pcm = synth.consumeBytes(slice);
+    if (pcm.length === 0) continue;
+    // Copy out of WASM memory before any further WASM calls.
+    parts.push(pcm.slice());
+    bufferedBytes += pcm.length;
+    totalSamples += pcm.length >>> 1;
+    if (bufferedBytes >= maxBytes) flush();
+  }
   flush();
   return totalSamples;
 }

@@ -3,7 +3,7 @@ use crate::synth::{karplus_strong, midi_to_hz, noise_burst, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::envelope,
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -147,7 +147,7 @@ impl Plugin for MedievalPlugin {
         DrumPattern { steps }
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Tabor: pitched membrane tone + short beater-on-skin noise transient.
             let freq = 150.0 + f64::from(config.color % 20);
@@ -155,7 +155,7 @@ impl Plugin for MedievalPlugin {
             let body = sine(config.sample_rate, freq, dur_sec, 0.28);
             let body = envelope(config.sample_rate, &body, 0.002, 0.12, 0.0, 0.02);
             let transient_dur = (0.012_f64).min(config.step_duration * 0.25);
-            let hit = noise_burst(config.sample_rate, &config.random, transient_dur, 0.10);
+            let hit = noise_burst(config.sample_rate, config.random, transient_dur, 0.10);
             let hit = envelope(config.sample_rate, &hit, 0.001, 0.010, 0.0, 0.001);
             let mut mixed: alloc::vec::Vec<f32> = body;
             for (i, &v) in hit.iter().enumerate() {
@@ -170,7 +170,7 @@ impl Plugin for MedievalPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.16 } else { 0.08 };
             let dur_n = (0.09_f64).min(config.step_duration);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let noise = noise_burst(config.sample_rate, config.random, dur_n, amp);
             let tone = sine(config.sample_rate, 100.0, dur_n, amp * 0.50);
             let body: alloc::vec::Vec<f32> = noise
                 .iter()
@@ -194,7 +194,7 @@ impl Plugin for MedievalPlugin {
             let j2 = envelope(config.sample_rate, &j2, 0.001, 0.043, 0.0, 0.0);
             let j3 = sine(config.sample_rate, f_j * 1.21, j_dur, jamp * 0.70);
             let j3 = envelope(config.sample_rate, &j3, 0.001, 0.036, 0.0, 0.0);
-            let j_noise = noise_burst(config.sample_rate, &config.random, j_dur, jamp * 0.45);
+            let j_noise = noise_burst(config.sample_rate, config.random, j_dur, jamp * 0.45);
             let j_noise = envelope(config.sample_rate, &j_noise, 0.001, 0.018, 0.0, 0.0);
             let jingle: alloc::vec::Vec<f32> = j1
                 .iter()
@@ -233,7 +233,7 @@ impl Plugin for MedievalPlugin {
             let tonal = envelope(config.sample_rate, &tonal, 0.001, decay, 0.0, 0.0);
 
             let t_dur = (0.012_f64).min(config.step_duration * 0.25);
-            let transient = noise_burst(config.sample_rate, &config.random, t_dur, amp * 1.6);
+            let transient = noise_burst(config.sample_rate, config.random, t_dur, amp * 1.6);
             let transient = envelope(config.sample_rate, &transient, 0.001, 0.010, 0.0, 0.001);
 
             let mut mixed = tonal;

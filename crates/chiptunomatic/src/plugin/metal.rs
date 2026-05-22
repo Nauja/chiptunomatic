@@ -3,7 +3,7 @@ use crate::synth::{midi_to_hz, sine, square, vibrato_sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -157,7 +157,7 @@ impl Plugin for MetalPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Heavy double-kick thud: square body + sine sub for low-end weight.
             let freq = 55.0 + f64::from(config.color % 8);
@@ -178,7 +178,7 @@ impl Plugin for MetalPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.36 } else { 0.16 };
             let dur_n = (0.055_f64).min(config.step_duration);
-            let raw = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let raw = noise_burst(config.sample_rate, config.random, dur_n, amp);
             overlay_samples(
                 &envelope(config.sample_rate, &raw, 0.0, 0.022, 0.0, 0.012),
                 samples,
@@ -196,11 +196,11 @@ impl Plugin for MetalPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.090_f64).min(config.step_duration * 2.0);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.16);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.16);
                     envelope(config.sample_rate, &s, 0.0, 0.035, 0.08, 0.025)
                 } else {
                     let d = (0.014_f64).min(config.step_duration * 0.32);
-                    noise_burst(config.sample_rate, &config.random, d, 0.14)
+                    noise_burst(config.sample_rate, config.random, d, 0.14)
                 },
                 samples,
             );

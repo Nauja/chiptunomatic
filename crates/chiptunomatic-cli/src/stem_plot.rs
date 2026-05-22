@@ -34,10 +34,10 @@ impl StemPlotBuffer {
             return;
         }
         for s in samples {
-            self.voice.push(s.song.voice.value);
-            self.square.push(s.song.square.value);
-            self.triangle.push(s.song.triangle.value);
-            self.noise.push(s.drum);
+            self.voice.push(s.stems.voice.value);
+            self.square.push(s.stems.square.value);
+            self.triangle.push(s.stems.triangle.value);
+            self.noise.push(s.stems.noise);
         }
         self.trim();
     }

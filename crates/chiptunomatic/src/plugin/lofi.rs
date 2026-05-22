@@ -3,7 +3,7 @@ use crate::synth::{fm_sine, karplus_strong, midi_to_hz, pitch_sweep_sine, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumSample, DrumStep,
+    DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -137,7 +137,7 @@ impl Plugin for LofiPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Punchy boom-bap kick: pitch sweep from 100 Hz → 45 Hz
             let dur_sec = (0.15_f64).min(config.step_duration * 2.5);
@@ -152,7 +152,7 @@ impl Plugin for LofiPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.14 } else { 0.07 };
             let dur_n = (0.10_f64).min(config.step_duration);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let noise = noise_burst(config.sample_rate, config.random, dur_n, amp);
             let tone = sine(config.sample_rate, 180.0, dur_n, amp * 0.4);
             let mixed: alloc::vec::Vec<f32> = noise
                 .iter()
@@ -169,12 +169,12 @@ impl Plugin for LofiPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.07_f64).min(config.step_duration * 2.5);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.07);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.07);
                     envelope(config.sample_rate, &s, 0.001, 0.04, 0.20, 0.03)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.05 } else { 0.03 };
                     let d = (0.012_f64).min(config.step_duration * 0.35);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );
@@ -185,7 +185,7 @@ impl Plugin for LofiPlugin {
         // works even when no kick/snare/hat fired.
         let hiss = noise_burst(
             config.sample_rate,
-            &config.random,
+            config.random,
             config.step_duration,
             0.014,
         );
@@ -197,7 +197,7 @@ impl Plugin for LofiPlugin {
         if config.random.next_float() < 0.08 {
             let amp = 0.07 + config.random.next_float() * 0.09; // 0.07–0.16
             let dur = 0.002 + config.random.next_float() as f64 * 0.003; // 2–5 ms
-            let crackle = noise_burst(config.sample_rate, &config.random, dur, amp);
+            let crackle = noise_burst(config.sample_rate, config.random, dur, amp);
             let crackle = envelope(config.sample_rate, &crackle, 0.0, dur * 0.6, 0.0, dur * 0.4);
             overlay_samples(&crackle, samples);
         }

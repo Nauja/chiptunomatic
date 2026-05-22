@@ -1,8 +1,11 @@
 [package]
 name = "chiptunomatic"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "AGPL-3.0"
+categories = ["no-std"]
+documentation = "https://docs.rs/chiptunomatic"
+homepage = "https://github.com/Nauja/chiptunomatic"
 repository = "https://github.com/Nauja/chiptunomatic"
 description = "Deterministic chiptune generator from binary input (WASM-compatible library)"
 
@@ -26,6 +29,7 @@ md5 = "0.8.0"
 hound = { version = "3", optional = true }
 thiserror = "2.0.18"
 dyn-clone = "1.0.20"
+getset = "0.1.6"
 
 [dev-dependencies]
 anyhow = "1.0.102"

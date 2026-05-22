@@ -1,11 +1,11 @@
-#[cfg(feature = "std")]
-use crate::ReadSongNotes;
-use core::cell::RefCell;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use std::{io::Read, path::Path};
 
 use crate::constants::{NOTE_NAMES, PENTATONIC_MINOR, SAMPLE_RATE};
+use crate::consumer::Consume;
 use crate::plugin::chiptune::ChiptunePlugin;
 use crate::plugin::koto::KotoPlugin;
 use crate::plugin::metal::MetalPlugin;
@@ -14,14 +14,13 @@ use crate::plugin::rock::RockPlugin;
 use crate::plugin::samba::SambaPlugin;
 use crate::plugin::toy::ToyPlugin;
 use crate::plugin::trap::TrapPlugin;
-use crate::plugin::{Plugin, Random};
-use crate::{DrumSampleGenerator, MixGenerator, SampleDrumSteps, SongNoteReader};
+use crate::plugin::Plugin;
+use crate::random::{NoRandom, Random};
+use crate::{Arpeggiator, Mixer, NoteGenerator, Sample, SampleDrum, Sampler};
 use crate::{SongMetadata, Timing};
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use rand::{Rng, SeedableRng};
+use getset::{Getters, MutGetters, Setters, WithSetters};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -65,84 +64,95 @@ pub enum ChiptunomaticError {
     InvalidMode(String),
 }
 
-pub struct RandomWrapper<R: Rng + ?Sized> {
-    rng: Rc<RefCell<R>>,
-}
-
-impl<R: Rng + ?Sized> Debug for RandomWrapper<R> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("RandomWrapper").finish()
-    }
-}
-
-impl<R: Rng + SeedableRng> RandomWrapper<R> {
-    pub fn from_seed(seed: u64) -> Self {
-        Self {
-            rng: Rc::new(RefCell::new(R::seed_from_u64(seed))),
-        }
-    }
-}
-
-impl<R: Rng + ?Sized> Random for RandomWrapper<R> {
-    fn next_float(&self) -> f32 {
-        self.rng.borrow_mut().gen::<f32>()
-    }
-}
-
+#[derive(Debug, Clone, Getters, MutGetters, Setters, WithSetters)]
 pub struct Chiptunomatic {
-    plugins: Vec<Rc<dyn Plugin>>,
-    selected_plugin: Rc<dyn Plugin>,
-    song_metadata: SongMetadata,
+    #[getset(get = "pub", get_mut = "pub", set = "pub", set_with = "pub")]
+    plugins: Vec<Box<dyn Plugin>>,
+    #[getset(get = "pub", get_mut = "pub", set = "pub", set_with = "pub")]
+    plugin: Box<dyn Plugin>,
+    #[getset(get = "pub")]
+    metadata: SongMetadata,
+    #[getset(get = "pub", set = "pub", set_with = "pub")]
     sample_rate: u32,
+    note_generator: NoteGenerator,
+    #[getset(get = "pub", get_mut = "pub")]
+    arpeggiator: Arpeggiator,
+    sampler: Sampler,
+    drum_samples: SampleDrum,
+    #[getset(get = "pub", get_mut = "pub")]
+    mixer: Mixer,
+    #[getset(set = "pub", set_with = "pub")]
+    random: Box<dyn Random>,
 }
 
-impl Chiptunomatic {
-    /// Initialize with the default plugin
-    pub fn new() -> Self {
-        let plugin = Rc::new(ChiptunePlugin::new());
-        let mut chiptunomatic = Chiptunomatic {
+impl Consume for Chiptunomatic {
+    type Item = u8;
+
+    fn push(&mut self, byte: u8) {
+        self.note_generator.push(byte);
+    }
+
+    fn extend(&mut self, bytes: &[u8]) {
+        self.note_generator.extend(bytes);
+    }
+
+    fn capacity(&self) -> usize {
+        self.note_generator.capacity()
+    }
+
+    fn len(&self) -> usize {
+        self.note_generator.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.note_generator.is_empty()
+    }
+}
+
+impl Default for Chiptunomatic {
+    fn default() -> Self {
+        let plugin = Box::new(ChiptunePlugin::new());
+        let mut chiptunomatic = Self {
             plugins: Default::default(),
-            selected_plugin: plugin.clone(),
-            song_metadata: Default::default(),
+            plugin: plugin.clone(),
+            metadata: Default::default(),
             sample_rate: SAMPLE_RATE,
+            note_generator: Default::default(),
+            arpeggiator: Default::default(),
+            sampler: Default::default(),
+            drum_samples: Default::default(),
+            mixer: Default::default(),
+            random: Box::new(NoRandom::default()),
         };
 
         chiptunomatic.plugins.push(plugin);
         chiptunomatic
     }
+}
 
+impl Chiptunomatic {
     pub fn with_default_plugins(self) -> Self {
         let mut other = Self { ..self };
         other.register_default_plugins();
         other
     }
 
-    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            ..self
-        }
-    }
-
-    pub fn register_plugin(&mut self, plugin: Rc<dyn Plugin>) {
+    pub fn register_plugin(&mut self, plugin: Box<dyn Plugin>) -> &mut Self {
         self.plugins.push(plugin);
+        self
     }
 
     pub fn register_default_plugins(&mut self) {
         // self.register_plugin(Rc::new(LofiPlugin {}));
-        self.register_plugin(Rc::new(RockPlugin {}));
-        self.register_plugin(Rc::new(MetalPlugin {}));
+        self.register_plugin(Box::new(RockPlugin {}));
+        self.register_plugin(Box::new(MetalPlugin {}));
         // self.register_plugin(Rc::new(PersianPlugin {}));
-        self.register_plugin(Rc::new(RapPlugin {}));
-        self.register_plugin(Rc::new(TrapPlugin {}));
-        self.register_plugin(Rc::new(ToyPlugin {}));
-        self.register_plugin(Rc::new(SambaPlugin {}));
-        self.register_plugin(Rc::new(KotoPlugin {}));
+        self.register_plugin(Box::new(RapPlugin {}));
+        self.register_plugin(Box::new(TrapPlugin {}));
+        self.register_plugin(Box::new(ToyPlugin {}));
+        self.register_plugin(Box::new(SambaPlugin {}));
+        self.register_plugin(Box::new(KotoPlugin {}));
         // self.register_plugin(Rc::new(MedievalPlugin {}));
-    }
-
-    pub fn plugin(&self) -> Rc<dyn Plugin> {
-        self.selected_plugin.clone()
     }
 
     /// Return the possible modes
@@ -156,21 +166,54 @@ impl Chiptunomatic {
 
     /// Get the selected mode
     pub fn mode(&self) -> &'static str {
-        self.selected_plugin.mode()
+        self.plugin.mode()
     }
 
     pub fn mode_string(&self) -> String {
-        self.selected_plugin.mode_string()
+        self.plugin.mode_string()
     }
 
     /// Set the selected mode
     pub fn set_mode(&mut self, mode: &String) -> Result<(), ChiptunomaticError> {
         if let Some(plugin) = self.plugins.iter().find(|p| p.mode() == mode) {
-            self.selected_plugin = plugin.clone();
+            self.plugin = plugin.clone();
             Ok(())
         } else {
             Err(ChiptunomaticError::InvalidMode(mode.clone()))
         }
+    }
+
+    pub fn position(&self) -> u64 {
+        self.note_generator.position
+    }
+
+    pub fn melody_time(&self) -> f64 {
+        self.note_generator.melody_time
+    }
+
+    pub fn bass_time(&self) -> f64 {
+        self.note_generator.bass_time
+    }
+
+    /// Reset the state
+    pub fn reset(&mut self) {
+        self.note_generator = Default::default();
+        self.sampler = Default::default();
+        self.arpeggiator.reset();
+        self.mixer.reset();
+
+        // Also reset the RNG
+        self.random.set_seed(self.metadata.rng_seed);
+    }
+
+    fn set_metadata(&mut self, metadata: SongMetadata) {
+        // The RNG must be reset with the new seed
+        self.random.set_seed(metadata.rng_seed);
+
+        // Update the drum pattern in the sampler
+        self.drum_samples.set_drum_pattern(metadata.drum_pattern);
+
+        self.metadata = metadata;
     }
 
     /// Builds [`SongMetadata`] from a bytes seed and stream byte length.
@@ -202,14 +245,12 @@ impl Chiptunomatic {
             .map_err(|_| GenerateError::InvalidSeed)?;
 
         let root = (root_seed % 12) as u8;
-        let bpm = self.selected_plugin.tempo_from_seed(root_seed);
+        let bpm = self.plugin.tempo_from_seed(root_seed);
         let timing = Timing::from_bpm(bpm);
         let total_beats = data_byte_len / 3;
         let total_duration = (total_beats as f64) * timing.beat_duration;
-        let chord_progression = self.selected_plugin.chord_progression_from_seed(chord_seed);
-        let drum_pattern = self
-            .selected_plugin
-            .drum_pattern_from_seed(&drum_pattern_seed);
+        let chord_progression = self.plugin.chord_progression_from_seed(chord_seed);
+        let drum_pattern = self.plugin.drum_pattern_from_seed(&drum_pattern_seed);
         let chord_description = Self::build_chord_description(root, &chord_progression);
 
         Ok(SongMetadata {
@@ -236,8 +277,8 @@ impl Chiptunomatic {
         seed: &[u8],
         data_byte_len: u64,
     ) -> Result<SongMetadata, GenerateError> {
-        self.song_metadata = self.song_metadata_from_seed(seed, data_byte_len)?;
-        Ok(self.song_metadata.clone())
+        self.set_metadata(self.song_metadata_from_seed(seed, data_byte_len)?);
+        Ok(self.metadata.clone())
     }
 
     pub fn song_metadata_from_string<S: Into<String>>(
@@ -284,37 +325,28 @@ impl Chiptunomatic {
         &mut self,
         path: P,
     ) -> Result<SongMetadata, SongMetadataFromPathError> {
-        self.song_metadata = self.song_metadata_from_path(path)?;
-        Ok(self.song_metadata.clone())
+        self.set_metadata(self.song_metadata_from_path(path)?);
+        Ok(self.metadata.clone())
     }
 
-    /// Return a reader for the notes of a byte stream
-    pub fn song_note_reader(&self) -> SongNoteReader {
-        SongNoteReader::new(self.song_metadata.clone(), self.selected_plugin.clone())
+    /// Generate the samples from the input stream
+    pub fn samples(&mut self) -> Vec<Sample> {
+        let mut samples: Vec<Sample> = Default::default();
+        while let Some(sample) = self.next() {
+            samples.push(sample);
+        }
+
+        samples
     }
 
-    #[cfg(feature = "std")]
-    /// Iterate over the notes of a byte stream
-    pub fn read_song_notes<R: Read>(&self, reader: R) -> ReadSongNotes<R, SongNoteReader> {
-        ReadSongNotes::new(reader, self.song_note_reader())
-    }
+    pub fn samples_buf(&mut self, buffer: &mut [Sample]) -> usize {
+        let mut samples_written = 0;
+        for sample in self {
+            buffer[samples_written] = sample;
+            samples_written += 1;
+        }
 
-    /// Return a generator for the drum samples
-    pub fn drum_sample_generator<R: Rng + SeedableRng + 'static>(&self) -> DrumSampleGenerator {
-        DrumSampleGenerator::new(
-            self.song_metadata.clone(),
-            self.selected_plugin.clone(),
-            Rc::new(RandomWrapper::<R>::from_seed(self.song_metadata.rng_seed)),
-        )
-        .with_sample_rate(self.sample_rate)
-    }
-
-    /// Iterate over the samples of the drum steps
-    pub fn sample_drum_steps<R: Rng + SeedableRng + 'static>(&self) -> SampleDrumSteps {
-        SampleDrumSteps::from_generator(
-            self.song_metadata.clone(),
-            self.drum_sample_generator::<R>(),
-        )
+        samples_written
     }
 
     /// Convert a file to WAV. `mode` selects chiptune or lofi synthesis.
@@ -323,45 +355,54 @@ impl Chiptunomatic {
         &mut self,
         input_path: IP,
         output_path: OP,
-        sample_rate: u32,
-        mix_generator: MixGenerator,
     ) -> Result<(), ConvertWavError> {
         use std::{fs::File, io::BufWriter};
 
         use hound::{SampleFormat, WavSpec, WavWriter};
-        use rand::rngs::StdRng;
 
+        self.reset();
         self.load_song_metadata_from_path(&input_path)?;
 
         let wav_spec = WavSpec {
             channels: 1,
-            sample_rate: sample_rate,
+            sample_rate: self.sample_rate,
             bits_per_sample: 16,
             sample_format: SampleFormat::Int,
         };
 
-        let input_file = File::open(&input_path)?;
+        let mut input_file = File::open(&input_path)?;
         let output_file = File::create(&output_path)?;
         let mut wav_writer = WavWriter::new(BufWriter::new(output_file), wav_spec)?;
 
-        // This iterator generates the drum samples on demand using StdRng
-        let drum_samples = self.sample_drum_steps::<StdRng>();
+        // Generate chunk by chunk
+        let mut buffer = [0u8; 1024];
 
-        // This generates the song samples and mix them with the drum notes
-        for mix in self
-            .read_song_notes(input_file)
-            .samples()
-            .with_sample_rate(sample_rate)
-            .mix(drum_samples)
-            .with_mix_generator(mix_generator)
-        {
-            let mix = mix?;
-            let pcm = (mix.frequency * 32767.0).clamp(-32768.0, 32767.0) as i16;
-            wav_writer.write_sample(pcm)?;
+        loop {
+            // Consume available samples
+            use std::io::Read;
+            let samples = self.samples();
+            for sample in samples {
+                let pcm = (sample.value * 32767.0).clamp(-32768.0, 32767.0) as i16;
+                wav_writer.write_sample(pcm)?;
+            }
+
+            // Push next bytes
+            let bytes_read = input_file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                // Reached EOF and no samples remaining
+                break;
+            }
+
+            self.note_generator.extend(&buffer[0..bytes_read]);
         }
 
         wav_writer.finalize()?;
         Ok(())
+    }
+
+    #[cfg(feature = "std")]
+    pub fn sample_reader<R: Read>(&mut self, reader: R) -> SampleReader<R> {
+        SampleReader::new(self, reader)
     }
 
     fn format_duration(secs: f64) -> String {
@@ -403,3 +444,100 @@ impl Chiptunomatic {
             .join(" – ")
     }
 }
+
+impl Iterator for Chiptunomatic {
+    type Item = Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // Drain available samples first
+            if let Some(mut sample) = self.sampler.sample(&self.plugin, self.sample_rate) {
+                // Add drums
+                sample.noise = self.drum_samples.next(
+                    &self.metadata,
+                    &self.plugin,
+                    self.sample_rate,
+                    &mut self.random,
+                );
+
+                // Mix
+                return Some(self.mixer.mix_sample(sample));
+            }
+
+            // Push the next note to generate new samples
+            match self.note_generator.note(&self.metadata, &self.plugin) {
+                None => return None,
+                Some(note) => {
+                    // Generate the arpeggios
+                    let notes = self
+                        .arpeggiator
+                        .expand_note(&self.metadata, &self.plugin, &note);
+
+                    self.sampler.extend(notes.as_slice());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+mod iter {
+    use std::io::Read;
+
+    use getset::{Getters, MutGetters};
+
+    use crate::{consumer::Consume, Chiptunomatic, Sample};
+
+    #[derive(Getters, MutGetters)]
+    pub struct SampleReader<'a, R: Read> {
+        #[getset(get = "pub", get_mut = "pub")]
+        chiptunomatic: &'a mut Chiptunomatic,
+        reader: R,
+        buffer: [u8; 1024],
+    }
+
+    impl<'a, R: Read> SampleReader<'a, R> {
+        pub fn new(chiptunomatic: &'a mut Chiptunomatic, reader: R) -> Self {
+            Self {
+                chiptunomatic,
+                reader,
+                buffer: [0; 1024],
+            }
+        }
+
+        pub fn next_buf(&mut self, buffer: &mut [Sample]) -> std::io::Result<usize> {
+            for i in 0..buffer.len() {
+                match self.next() {
+                    None => return Ok(i),
+                    Some(Err(e)) => return Err(e),
+                    Some(Ok(sample)) => buffer[i] = sample,
+                }
+            }
+
+            Ok(buffer.len())
+        }
+    }
+
+    impl<'a, R: Read> Iterator for SampleReader<'a, R> {
+        type Item = std::io::Result<Sample>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            loop {
+                // Drain available samples first
+                if let Some(sample) = self.chiptunomatic.next() {
+                    return Some(Ok(sample));
+                }
+
+                // Push the next bytes to generate new notes
+                match self.reader.read(&mut self.buffer) {
+                    Err(e) => return Some(Err(e)),
+                    Ok(0) => return None,
+                    Ok(n) => self.chiptunomatic.extend(&self.buffer[0..n]),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+pub use iter::*;

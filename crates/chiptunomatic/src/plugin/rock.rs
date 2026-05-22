@@ -3,7 +3,7 @@ use crate::synth::{midi_to_hz, sine, triangle};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst, square},
-    DrumSample, DrumStep,
+    DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -91,7 +91,7 @@ impl Plugin for RockPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Heavy kick: square thud + sine sub-layer for body
             let freq = 65.0 + f64::from(config.color % 10);
@@ -112,7 +112,7 @@ impl Plugin for RockPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.35 } else { 0.15 };
             let dur_n = (0.09_f64).min(config.step_duration);
-            let raw = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let raw = noise_burst(config.sample_rate, config.random, dur_n, amp);
             overlay_samples(
                 &envelope(config.sample_rate, &raw, 0.001, 0.04, 0.0, 0.02),
                 samples,
@@ -130,12 +130,12 @@ impl Plugin for RockPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.12_f64).min(config.step_duration * 3.0);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.18);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.18);
                     envelope(config.sample_rate, &s, 0.001, 0.06, 0.15, 0.04)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.14 } else { 0.08 };
                     let d = (0.022_f64).min(config.step_duration * 0.5);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );

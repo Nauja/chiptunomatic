@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chiptunomatic::{constants::SAMPLE_RATE, Chiptunomatic, MixGenerator, StemOutput};
+use chiptunomatic::{random::StdRandom, Chiptunomatic, MasterOutput, MixerConfig, StemOutput};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 use cli_log::*;
@@ -108,7 +108,9 @@ mod audio {
 fn main() -> anyhow::Result<()> {
     init_cli_log!();
 
-    let mut instance = Chiptunomatic::new().with_default_plugins();
+    let mut instance = Chiptunomatic::default()
+        .with_default_plugins()
+        .with_random(Box::new(StdRandom::new()));
 
     // Update the default values
     let cmd = Args::command().mut_arg("mode", |a| {
@@ -124,34 +126,36 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| e.exit())
         .unwrap();
 
+    // Select the user selected mode
     instance.set_mode(&args.mode)?;
 
-    let mix_generator = MixGenerator::default()
-        .with_master_output(StemOutput {
+    // Configure the volumes
+    instance.mixer_mut().set_config(MixerConfig {
+        master_output: MasterOutput {
             volume: args.volume,
             muted: args.muted,
-            solo: false,
-        })
-        .with_voice_output(StemOutput {
+        },
+        voice_output: StemOutput {
             volume: args.voice_volume,
             muted: args.voice_muted,
             solo: args.voice_solo,
-        })
-        .with_square_output(StemOutput {
+        },
+        square_output: StemOutput {
             volume: args.square_volume,
             muted: args.square_muted,
             solo: args.square_solo,
-        })
-        .with_triangle_output(StemOutput {
+        },
+        triangle_output: StemOutput {
             volume: args.triangle_volume,
             muted: args.triangle_muted,
             solo: args.triangle_solo,
-        })
-        .with_noise_output(StemOutput {
+        },
+        noise_output: StemOutput {
             volume: args.noise_volume,
             muted: args.noise_muted,
             solo: args.noise_solo,
-        });
+        },
+    });
 
     match (args.input.as_deref(), args.output.as_deref(), args.info) {
         (None, Some(_), _) => anyhow::bail!("--output requires an input file"),
@@ -162,10 +166,10 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         (Some(input), Some(output), false) => {
-            instance.file_to_wav(input, output, SAMPLE_RATE, mix_generator)?;
+            instance.file_to_wav(input, output)?;
             Ok(())
         }
-        (Some(input), None, false) => tui::run(instance, Some(input), mix_generator),
-        (None, None, false) => tui::run(instance, None, mix_generator),
+        (Some(input), None, false) => tui::run(instance, Some(input)),
+        (None, None, false) => tui::run(instance, None),
     }
 }

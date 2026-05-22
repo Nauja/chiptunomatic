@@ -2,7 +2,7 @@ use crate::{
     constants::CHORD_PROGRESSIONS,
     plugin::{overlay_samples, Plugin, SampleStepConfig, String, Vec},
     synth::{envelope, noise_burst, square},
-    BassNote, DrumSample, DrumStep, MelodyNote, SampleStem, SquareNote, StemSample, TriangleNote,
+    BassNote, DrumStep, MelodyNote, SampleStem, SquareNote, StemSample, TriangleNote,
 };
 
 /// Square + triangle waves, 100–140 BPM, pentatonic minor.
@@ -68,7 +68,7 @@ impl Plugin for ChiptunePlugin {
         .sample_triangle(sample_rate)
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             let freq = 60.0 + f64::from(config.color % 12);
             let dur_sec = (0.12_f64).min(config.step_duration * 2.0);
@@ -82,7 +82,7 @@ impl Plugin for ChiptunePlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.22 } else { 0.09 };
             let dur_n = (0.07_f64).min(config.step_duration);
-            let raw = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let raw = noise_burst(config.sample_rate, config.random, dur_n, amp);
             overlay_samples(
                 &envelope(config.sample_rate, &raw, 0.001, 0.055, 0.0, 0.015),
                 samples,
@@ -92,12 +92,12 @@ impl Plugin for ChiptunePlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.09_f64).min(config.step_duration * 3.0);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.12);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.12);
                     envelope(config.sample_rate, &s, 0.001, 0.07, 0.25, 0.03)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.10 } else { 0.05 };
                     let d = (0.018_f64).min(config.step_duration * 0.45);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );

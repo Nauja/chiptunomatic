@@ -1,17 +1,13 @@
 use core::fmt::Debug;
 
-use alloc::rc::Rc;
+use alloc::boxed::Box;
 pub use alloc::string::String;
 pub use alloc::vec::Vec;
 use dyn_clone::DynClone;
 
+use crate::random::Random;
 use crate::synth::{envelope, midi_to_hz, vibrato_sine};
-#[cfg(feature = "arpeggio")]
-use crate::ArpeggioConfig;
-use crate::{
-    constants::PENTATONIC_MINOR, BassNote, DrumPattern, DrumSample, DrumStep, MelodyNote,
-    StemSample,
-};
+use crate::{constants::PENTATONIC_MINOR, BassNote, DrumPattern, DrumStep, MelodyNote, StemSample};
 
 pub mod chiptune;
 pub mod koto;
@@ -25,21 +21,16 @@ pub mod samba;
 pub mod toy;
 pub mod trap;
 
-/// Hide the generic Rng object
-pub trait Random: Debug {
-    fn next_float(&self) -> f32;
-}
-
 #[derive(Debug)]
 pub struct SampleStepConfig<'a> {
     pub sample_rate: f64,
     pub step_duration: f64,
     pub pattern: usize,
     pub color: u8,
-    pub random: &'a Rc<dyn Random>,
+    pub random: &'a mut Box<dyn Random>,
 }
 
-pub trait Plugin: Debug + DynClone {
+pub trait Plugin: Debug + DynClone + Send {
     /// Return the mode name
     fn mode(&self) -> &'static str;
     fn mode_string(&self) -> String;
@@ -82,9 +73,9 @@ pub trait Plugin: Debug + DynClone {
     /// Sample a drum step
     fn sample_step<'a>(
         &self,
-        step: DrumStep,
+        step: &DrumStep,
         config: SampleStepConfig<'a>,
-        samples: &mut Vec<DrumSample>,
+        samples: &mut Vec<f32>,
     );
 
     /// Build a 16-step drum pattern from an 8-byte seed.
@@ -92,19 +83,11 @@ pub trait Plugin: Debug + DynClone {
     fn drum_pattern_from_seed(&self, seed: &[u8; 8]) -> DrumPattern {
         DrumPattern::from_seed(seed)
     }
-
-    #[cfg(feature = "arpeggio")]
-    /// Return an arpeggio configuration for this plugin, or `None` to play
-    /// notes as-is.  Wrap a [`SongNoteReader`] with [`ArpeggioNoteReader`]
-    /// to apply it.
-    fn arpeggio(&self) -> Option<ArpeggioConfig> {
-        None
-    }
 }
 
 dyn_clone::clone_trait_object!(Plugin);
 
-pub(crate) fn overlay_samples(src: &Vec<DrumSample>, dst: &mut Vec<DrumSample>) {
+pub(crate) fn overlay_samples(src: &Vec<f32>, dst: &mut Vec<f32>) {
     for i in 0..dst.len().min(src.len()) {
         dst[i] += src[i];
     }

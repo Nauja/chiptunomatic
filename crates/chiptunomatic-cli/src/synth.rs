@@ -1,12 +1,9 @@
 //! Shared note → sample → mix pipeline for headless CLI and TUI playback.
 
-use std::fs::File;
-
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anyhow::Result;
-use chiptunomatic::{ArpeggioConfig, ArpeggioPattern, Chiptunomatic, Mix, MixGenerator, Sample};
-use rand::rngs::StdRng;
+use chiptunomatic::Sample;
 
 /// Signals that TUI playback was interrupted to start another file or stop streaming.
 #[derive(Debug)]
@@ -20,79 +17,13 @@ impl std::fmt::Display for PlaybackCancelled {
 
 impl std::error::Error for PlaybackCancelled {}
 
-pub(crate) trait MixChunkSink {
-    fn consume(&mut self, mixes: &[Mix]) -> Result<()>;
-
-    /// Per-stem samples before peak-normalized mix; used for TUI waveform display.
-    fn tap_samples(&mut self, _samples: &[Sample]) {}
-}
-
-/// Outcome of streaming a song through a [`MixChunkSink`].
+/// Outcome of a synthesis run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SynthCompletion {
     /// Reached end of the note stream.
     Finished,
     /// Stopped early (e.g. playback cancelled for a new request).
     Interrupted,
-}
-
-pub(crate) fn drive_synthesis(
-    instance: &mut Chiptunomatic,
-    path: &std::path::Path,
-    consumer: &mut dyn MixChunkSink,
-) -> Result<SynthCompletion> {
-    let reader = File::open(path)?;
-    drive_synthesis_reader(instance, reader, consumer)
-}
-
-pub(crate) fn drive_synthesis_reader(
-    instance: &mut Chiptunomatic,
-    reader: File,
-    consumer: &mut dyn MixChunkSink,
-) -> Result<SynthCompletion> {
-    let song_samples = instance
-        .read_song_notes(reader)
-        .with_capacity(1024)
-        .with_arpeggio(ArpeggioConfig {
-            subdivisions: 1,
-            pattern: ArpeggioPattern::UpDown,
-        })
-        .samples();
-    let drum_samples = instance.sample_drum_steps::<StdRng>();
-    // Use a bare default generator here; PlaybackSink re-applies volumes/muting per-chunk.
-    let mut mixes = song_samples.mix(drum_samples);
-    let mut mixes_buffer = [Mix::default(); 1024];
-    let mut interrupted = false;
-
-    loop {
-        match mixes.fill_buf(&mut mixes_buffer)? {
-            0 => break,
-            n => {
-                consumer.tap_samples(
-                    mixes_buffer
-                        .iter()
-                        .take(n)
-                        .map(|m| m.sample)
-                        .collect::<Vec<Sample>>()
-                        .as_slice(),
-                );
-                match consumer.consume(&mixes_buffer[0..n]) {
-                    Ok(()) => {}
-                    Err(e) if e.is::<PlaybackCancelled>() => {
-                        interrupted = true;
-                        break;
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-    }
-
-    Ok(if interrupted {
-        SynthCompletion::Interrupted
-    } else {
-        SynthCompletion::Finished
-    })
 }
 
 #[derive(Debug)]
@@ -161,50 +92,27 @@ pub(crate) struct PlaybackSink<'a> {
     pub(crate) stem_plot: std::sync::Arc<std::sync::Mutex<crate::stem_plot::StemPlotBuffer>>,
     pub(crate) playback_progress: std::sync::Arc<PlaybackProgress>,
     pub(crate) is_paused: std::sync::Arc<AtomicBool>,
-    /// Shared with the UI thread so mute/solo/volume changes take effect immediately.
-    pub(crate) shared_mix: std::sync::Arc<std::sync::Mutex<MixGenerator>>,
-    /// Running peak across the whole track for normalisation.
-    pub(crate) peak: f32,
 }
 
-impl MixChunkSink for PlaybackSink<'_> {
-    fn tap_samples(&mut self, samples: &[Sample]) {
+impl PlaybackSink<'_> {
+    pub(crate) fn tap_samples(&mut self, samples: &[Sample]) {
         if let Ok(mut g) = self.stem_plot.lock() {
             g.push_samples(samples);
         }
     }
 
-    fn consume(&mut self, mixes: &[Mix]) -> Result<()> {
+    pub(crate) fn consume(&mut self, samples: &[Sample]) -> Result<()> {
         if self.live_generation.load(Ordering::SeqCst) != self.my_generation {
             return Err(PlaybackCancelled.into());
         }
 
-        if mixes.is_empty() {
+        if samples.is_empty() {
             return Ok(());
         }
 
-        // Snapshot the current mix settings (lock is released immediately after copy).
-        let mg = self.shared_mix.lock().map(|g| *g).unwrap_or_default();
-
         // Re-apply per-stem volumes/muting from the live snapshot.
         // `Mix.sample` holds raw per-stem synthesis output (bare default generator was used).
-        let mut peak = self.peak;
-        let mut chunk = Vec::with_capacity(mixes.len());
-        for m in mixes {
-            let voice = m.sample.song.voice.value * mg.effective_voice_volume();
-            let square = m.sample.song.square.value * mg.effective_square_volume();
-            let triangle = m.sample.song.triangle.value * mg.effective_triangle_volume();
-            let noise = m.sample.drum * mg.effective_noise_volume();
-            let mut mixed = voice + square + triangle + noise;
-            peak = peak.max(mixed.abs());
-            if peak > 0.0 {
-                mixed /= peak;
-            }
-            mixed *= 0.9 * mg.effective_master_volume();
-            chunk.push(mixed);
-        }
-        self.peak = peak;
-
+        let chunk: Vec<f32> = samples.iter().map(|s| s.value).collect();
         self.audio.append(chunk.as_slice());
         self.playback_progress.add_samples(chunk.len() as u64);
 

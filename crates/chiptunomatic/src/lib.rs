@@ -27,12 +27,15 @@ extern crate std;
 mod arpeggio;
 mod chiptunomatic;
 pub mod constants;
+pub mod consumer;
 mod drum;
 mod metadata;
 mod mix;
 mod note;
 pub mod plugin;
-mod song;
+pub mod producer;
+pub mod random;
+mod sample;
 pub mod synth;
 
 #[cfg(feature = "arpeggio")]
@@ -42,4 +45,4 @@ pub use drum::*;
 pub use metadata::*;
 pub use mix::*;
 pub use note::*;
-pub use song::*;
+pub use sample::*;

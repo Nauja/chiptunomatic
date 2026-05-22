@@ -1,13 +1,11 @@
 /// <reference lib="webworker" />
 
-import {
-  streamPcmChunksFromIncrementalPlan,
-} from './wav-mono-i16';
+import { streamPcmChunksFromSynthesizer } from './wav-mono-i16';
 import { songInfoFromMetadataView } from './chiptunomatic-metadata';
 import type {
   ChiptuneSongInfo,
   ChiptunomaticWasmModule,
-  DrumSampleGeneratorHandle,
+  IncrementalSynthesizerHandle,
   SongMetadataJs,
 } from './chiptunomatic-types';
 import type {
@@ -18,6 +16,7 @@ import type {
 } from './chiptunomatic-worker-messages';
 
 const PCM_CHUNK_SAMPLES = 8192;
+const INPUT_CHUNK_BYTES = 4096;
 
 const gluePromisesByHref = new Map<string, Promise<ChiptunomaticWasmModule>>();
 
@@ -62,7 +61,7 @@ self.onmessage = async (evt: MessageEvent<MainWorkerMessage>) => {
   const { id, wasmScriptHref, fileName, buffer, mode } = msg;
 
   let metadataView: SongMetadataJs | undefined;
-  let drumGen: DrumSampleGeneratorHandle | undefined;
+  let synth: IncrementalSynthesizerHandle | undefined;
 
   try {
     const glue = await loadGlue(wasmScriptHref);
@@ -95,23 +94,14 @@ self.onmessage = async (evt: MessageEvent<MainWorkerMessage>) => {
         1,
         Math.ceil(metadataView.totalDuration * hz + hz / 10),
       );
-      post({
-        type: 'wav_begin',
-        id,
-        sampleRateHz: hz,
-        pcmSampleCapacityHint,
-      });
+      post({ type: 'wav_begin', id, sampleRateHz: hz, pcmSampleCapacityHint });
 
-      drumGen = glue.DrumSampleGenerator.withMetadata(metadataView, hz);
+      synth = glue.IncrementalSynthesizer.withMetadata(metadataView);
 
-      const totalPcmSamples = streamPcmChunksFromIncrementalPlan(
-        glue.SongNoteReader,
-        metadataView,
+      const totalPcmSamples = streamPcmChunksFromSynthesizer(
+        synth,
         input,
-        hz,
-        glue.SampleGenerator,
-        glue.IterMix,
-        drumGen,
+        INPUT_CHUNK_BYTES,
         PCM_CHUNK_SAMPLES,
         (pcmBytesOwned) => {
           const u = pcmBytesOwned.slice();
@@ -129,7 +119,7 @@ self.onmessage = async (evt: MessageEvent<MainWorkerMessage>) => {
     const message = e instanceof Error ? e.message : String(e);
     post({ type: 'error', id, phase: 'metadata', message });
   } finally {
-    drumGen?.free();
+    synth?.free();
     metadataView?.free();
   }
 };
