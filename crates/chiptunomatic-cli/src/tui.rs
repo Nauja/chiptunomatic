@@ -12,7 +12,7 @@ use anyhow::{Context as _, Result};
 use chiptunomatic::constants::{NOTE_NAMES, SAMPLE_RATE};
 use chiptunomatic::{Chiptunomatic, MixerConfig, Sample, SongMetadata};
 use cli_log::info;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -420,6 +420,7 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
     };
 
     let mut focused_button: Option<FocusedButton> = None;
+    let mut autoplay = false;
     let mut last_sel: Option<PathBuf> = None;
     let mut meta_title: String = "Song".into();
     let mut meta_text: Text<'static> = Text::from(vec![
@@ -457,6 +458,7 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
         }
 
         while let Ok(r) = done_rx.try_recv() {
+            let finished_ok = r.is_ok();
             last_finished = Some(r.clone());
             current_playing = None;
             is_paused.store(false, Ordering::SeqCst);
@@ -464,6 +466,37 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                 Ok(()) => "Playback finished.".to_string(),
                 Err(e) => format!("Playback error: {e}"),
             };
+
+            if autoplay && finished_ok {
+                // Advance the explorer to the next file, skipping directories.
+                let down_ev = Event::Key(KeyEvent {
+                    code: KeyCode::Char('j'),
+                    modifiers: KeyModifiers::NONE,
+                    kind: KeyEventKind::Press,
+                    state: KeyEventState::NONE,
+                });
+                for _ in 0..256 {
+                    let _ = file_explorer.handle(&down_ev);
+                    if file_explorer.current().is_file() {
+                        break;
+                    }
+                }
+                last_sel = None;
+                let cur = file_explorer.current();
+                if cur.is_file() {
+                    playback_hint = format!("Autoplay: {}", cur.name);
+                    let total_samples = instance
+                        .load_song_metadata_from_path(&cur.path)
+                        .map(|m| {
+                            playing_meta = Some(format_metadata(&m));
+                            (m.total_duration * f64::from(SAMPLE_RATE)).round() as u64
+                        })
+                        .unwrap_or(0);
+                    current_playing = Some(cur.path.clone());
+                    last_finished = None;
+                    let _ = send_play(instance.clone(), cur.path.clone(), total_samples);
+                }
+            }
         }
 
         let current = file_explorer.current().path.clone();
@@ -516,7 +549,9 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                 Span::styled(" Tab ", Style::default().fg(Color::Yellow)),
                 Span::raw(" focus M/S  ·  "),
                 Span::styled(" Space ", Style::default().fg(Color::Yellow)),
-                Span::raw(" toggle"),
+                Span::raw(" toggle  ·  "),
+                Span::styled(" a ", Style::default().fg(Color::Yellow)),
+                Span::raw(if autoplay { " autoplay [on]" } else { " autoplay [off]" }),
             ]));
             let help_content_w = area.width.max(1);
             let help_need_lines = Paragraph::new(help_keys_text.clone())
@@ -1001,6 +1036,15 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
                             } else {
                                 playback_hint = format!("Mode: {}", mode);
                             }
+                            continue;
+                        }
+                        KeyCode::Char('a') if focused_button.is_none() => {
+                            autoplay = !autoplay;
+                            playback_hint = if autoplay {
+                                "Autoplay enabled.".to_string()
+                            } else {
+                                "Autoplay disabled.".to_string()
+                            };
                             continue;
                         }
                         KeyCode::Char('M') => {
