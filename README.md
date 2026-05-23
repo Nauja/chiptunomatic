@@ -184,14 +184,14 @@ The TUI shows real-time waveform charts for all four stems in a 2×2 grid (voice
 
 | | Chiptune | Lofi | Rock | Metal | Persian | Trap | Rap | Medieval | Koto | Toy | Samba |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| **BPM** | 150–179 | 74–82 | 115–145 | 140–175 | 72–90 | 125–154 | 84–99 | 80–100 | 80–99 | 95–114 | 100–115 |
-| **Scale** | Pentatonic minor | Pentatonic minor | Pentatonic minor | Pentatonic minor | Persian (b2, M3, P4, P5) | Pentatonic minor | Pentatonic minor | Dorian pentatonic | Hirajoshi pentatonic | Major pentatonic | Major pentatonic |
-| **Melody** | Square wave | Two-voice FM Rhodes (tine attack + warm body) + brass pad | Power chord square + soft clip | Power chord square + hard clip | FM ney flute (1:1, β=0.35) + octave whistle | FM bell (4:1, β=2.5) | FM piano (1.5:1, β=1.0) | Additive recorder (3 partials) + KS lute | Karplus-Strong string | FM tine (3:1, β=1.2) + octave shimmer | FM reedy (2:1, β=0.6) |
-| **Bass** | Triangle wave | 3-string KS guitar (root + P5 + octave) + warm sine | Overdriven triangle | Saturated square, very heavy | Karplus-Strong setar/oud | 808 pitch-sweep sine | Clean punchy sine | Open-fifth organum drone (root + P5) | Karplus-Strong string | Gentle sine | Punchy plucked sine |
-| **Kick** | Square wave | Pitch-sweep sine, soft | Square + sine sub, heavy | Square + sine sub, loud | Sine thump 130–145 Hz (tombak dom) | Pitch-sweep sine, very loud | Square + sine sub, tight | Sine thump + noise transient (tabor) | Sine thump (taiko) | Sine thump, very soft | Pitch-sweep sine, beats 2+4 (surdo) |
-| **Snare** | Noise burst | Noise + 180 Hz body, soft | Loud noise + 200 Hz body | Explosive noise + 220 Hz body | Noise + 380 Hz body, short (tombak tak) | Layered double-hit clap | Noise + 220 Hz body ("bap") | Noise + 100 Hz body (frame drum) + tambourine jingles | Noise + 200 Hz body, very soft | Noise + 150 Hz body, barely audible | Dense noise + 250 Hz body (caixa) |
-| **Hi-hat** | Moderate noise | Very quiet, short | Crisp, loud | Crisp, aggressive (8ths or 16ths) | Very sparse, restrained (finger cymbals) | Tight, metallic | Moderate, unhurried | 4-partial inharmonic bell (cymbala) + metallic transient | Barely audible shimmer | Nearly silent tick | Teleco-teco syncopation, noise + tok tone (tamborim) |
-| **Chords** | Pentatonic minor | Jazz-flavoured minor | I–V–IV rock patterns | Dark minor loops (i–m3–P5, i–m7) | Modal drone (i–M3–i–P4, i–b2–i–M3) | Dark minor loops | Soul/funk minor loops | Root–P4–P5 modal | Hirajoshi m3/P5/m6 loops | Major pentatonic bright loops | Major pentatonic circular loops |
+| **BPM** | 150–179 | 90–108 | 115–145 | 140–175 | 72–90 | 125–154 | 84–99 | 80–100 | 95–119 | 95–114 | 100–115 |
+| **Scale** | Pentatonic minor | Pentatonic minor | Pentatonic minor | Pentatonic minor | Persian (b2, M3, P4, P5) | Pentatonic minor | Pentatonic minor | Dorian pentatonic | Yo pentatonic (M2, P4, P5, M6) | Major pentatonic | Major pentatonic |
+| **Melody** | Square wave | FM Rhodes (tine attack + warm body) + brass pad + near-pure flute + atmospheric pad | Power chord square + soft clip | Power chord square + hard clip | FM ney flute (1:1, β=0.35) + octave whistle | FM bell (4:1, β=2.5) | FM piano (1.5:1, β=1.0) | Additive recorder (3 partials) + KS lute | KS string + faint octave partial | FM tine (3:1, β=1.2) + octave shimmer | FM reedy (2:1, β=0.6) |
+| **Bass** | Triangle wave | Warm electric bass (FM β=0.30) + sub-octave sine | Overdriven triangle | Saturated square, very heavy | Karplus-Strong setar/oud | 808 pitch-sweep sine | Clean punchy sine | Open-fifth organum drone (root + P5) | Karplus-Strong string | Gentle sine | Punchy plucked sine |
+| **Kick** | Square wave | Pitch-sweep sine, soft | Square + sine sub, heavy | Square + sine sub, loud | Sine thump 130–145 Hz (tombak dom) | Pitch-sweep sine, very loud | Square + sine sub, tight | Sine thump + noise transient (tabor) | Sine thump + 50 Hz sub (taiko) | Sine thump, very soft | Pitch-sweep sine, beats 2+4 (surdo) |
+| **Snare** | Noise burst | Noise + 180 Hz body, soft | Loud noise + 200 Hz body | Explosive noise + 220 Hz body | Noise + 380 Hz body, short (tombak tak) | Layered double-hit clap | Noise + 220 Hz body ("bap") | Noise + 100 Hz body (frame drum) + tambourine jingles | Noise + 200 Hz body, restrained | Noise + 150 Hz body, barely audible | Dense noise + 250 Hz body (caixa) |
+| **Hi-hat** | Moderate noise | Very quiet, short | Crisp, loud | Crisp, aggressive (8ths or 16ths) | Very sparse, restrained (finger cymbals) | Tight, metallic | Moderate, unhurried | 4-partial inharmonic bell (cymbala) + metallic transient | Inharmonic kane bell (1:2.4 ratio) | Nearly silent tick | Teleco-teco syncopation, noise + tok tone (tamborim) |
+| **Chords** | Pentatonic minor | Jazz-flavoured minor | I–V–IV rock patterns | Dark minor loops (i–m3–P5, i–m7) | Modal drone (i–M3–i–P4, i–b2–i–M3) | Dark minor loops | Soul/funk minor loops | Root–P4–P5 modal | Yo P4/P5/M6 circular loops | Major pentatonic bright loops | Major pentatonic circular loops |
 
 ### Chiptune mode
 
@@ -237,24 +237,28 @@ Each structural parameter is derived from a dedicated bit range of the root seed
 
 ### Lofi mode
 
-Lofi mode replaces every layer of the synthesis with something warmer and more laid-back.
+Lofi mode targets the lofi hip-hop sound: warm Rhodes piano, electric bass, laid-back jazz chords, and the characteristic background texture of vinyl and tape.
 
-**Tempo and chords.** BPM is pulled down to 74–82, and the chord progressions are drawn from a jazz-flavoured table (e.g. i – m7 – P5 – m7) rather than the straight pentatonic loops used in chiptune mode.
+**Tempo and chords.** BPM sits between 90 and 108 — in the lofi hip-hop range. Chord progressions are drawn from a jazz-flavoured table (e.g. i – m7 – P5 – m7) rather than the straight pentatonic loops used in chiptune mode.
 
-**Melody — Rhodes electric piano + warm brass.** The melody uses a two-voice FM model that reproduces the characteristic bright-then-warm sound of a struck Rhodes tine:
+**Melody — Rhodes electric piano + brass pad + flute.** The melody is pitched one octave below the standard register so it sits in the warm C3–C4 range. Five voices layer together:
 - *Tine attack* — a high modulation index (β=2.8, 2:1 ratio) creates a bright initial "ding" at 25 % amplitude. An ADSR envelope collapses it to silence in ~55 ms — it only exists for the transient.
-- *Tine body* — a low modulation index (β=0.45, 2:1 ratio) gives the warm, slightly bell-like sustain at 20 % amplitude. A 3 ms attack, 100 ms decay to a 55 % sustain, and 120 ms release let it carry the note.
-- *Harmony* — the same low-β FM formula applied to the harmony pitch at reduced amplitude (9 %), giving each chord note a soft accompaniment voice.
-- *Warm brass pad* — FM synthesis at a 1:1 modulation ratio with β=1.8 on the harmony pitch. The 1:1 ratio concentrates energy in low-order harmonics and the moderate β produces the closed, buzzy spectrum of a muted brass section at 11 % amplitude. A slow 40 ms attack lets it swell in under the Rhodes attack transient rather than competing with it.
+- *Tine body* — a low modulation index (β=0.45, 2:1 ratio) gives the warm, slightly bell-like sustain at 20 % amplitude.
+- *Harmony* — the same low-β FM formula applied to the harmony pitch at 9 % amplitude, giving each chord note a soft accompaniment voice.
+- *Warm brass pad* — FM at a 1:1 ratio with β=1.8 on the harmony pitch. The moderate β produces the closed, buzzy spectrum of a muted brass section at 11 % amplitude. A slow 40 ms attack lets it swell in under the Rhodes attack transient rather than competing with it.
+- *Lead flute* — a near-pure sine (16 %) with very faint 2nd and 3rd harmonics (1.2 % and 0.4 %) for a slight cylindrical-bore colour. A 20 ms attack mimics breath building before the tone speaks.
+- *Atmospheric pad* — a second FM pad (β=0.70, 1:1 ratio, 5.5 % amplitude) at the harmony pitch with an 80 ms slow-swelling attack. Sits underneath the other voices as harmonic glue.
 
-**Bass — three-string guitar.** Instead of a sine wave, the bass uses three Karplus-Strong voices voiced as an open guitar chord — root (20 %), perfect fifth at 1.4983× (11 %), and octave at 2× (5 %) — each seeded independently so they sound like distinct strings rather than copies. An 8 ms linear attack ramp softens the hard pluck onset into a mellow pluck while leaving the natural KS pitch-dependent decay intact. A warm sine at the root (10 %) reinforces the fundamental and rounds off high-frequency noise from the KS strings.
+**Bass — electric bass.** FM synthesis at a 2:1 ratio with a low β (0.30) gives the slight low-mid warmth of a neck-picked electric without adding high-frequency brightness. A sub-octave sine at half the fundamental frequency (12 %) adds the weight characteristic of lofi hip-hop bass.
 
 **Drums.** All three drum voices are softened:
 - *Kick* — a pitch-sweeping sine from 100 Hz down to 45 Hz over ~150 ms, shaped like a boom-bap thud.
 - *Snare* — a short noise burst blended with a 180 Hz sine body tone. Backbeats (steps 4 and 12) hit at full amplitude; other snare hits are halved.
 - *Hi-hat* — very quiet and short; open hats are slightly longer noise at low amplitude.
-- *Tape hiss* — a continuous low-level noise floor (1.4 % amplitude) is added to every step window, including silent ones, giving the whole track the characteristic analogue warmth of a tape-recorded beat.
-- *Vinyl crackle* — approximately 8 % of steps receive a short sharp pop (2–5 ms, 7–16 % amplitude) at the start of the window. Amplitude and duration vary so no two crackles sound identical.
+
+**SFX stem — vinyl and tape texture.** The SFX stem carries the lofi atmosphere continuously across every melody note:
+- *Tape hiss* — a chained-LCG white noise floor at 0.6 % amplitude, present for the full duration of every note. The chained generator (each sample state feeds the next) produces flat-spectrum noise with the even background texture of a tape-recorded signal.
+- *Vinyl crackle* — approximately 8 % of melody notes trigger a short sharp pop (2–5 ms, 15–23 % amplitude) at the start of the note window. Amplitude and duration vary from pop to pop; the result is fully deterministic (seeded from the note's byte position) so the same file always produces the same crackle pattern.
 
 ### Persian mode
 
@@ -358,20 +362,20 @@ Medieval mode is the most harmonically distinctive — it replaces the pentatoni
 
 ### Koto mode
 
-Koto mode is the only mode that uses a genuine physical model rather than waveform synthesis for the melody: the Karplus-Strong algorithm, which physically models a plucked string.
+Koto mode is the only mode that uses a genuine physical model rather than waveform synthesis for the melody: the Karplus-Strong algorithm, which physically models a plucked string. The overall character targets the bright, energetic sound of matsuri (festival) koto playing rather than contemplative solo koto.
 
-**Tempo and chords.** BPM sits between 80 and 99. Chord progressions are drawn from the Hirajoshi pentatonic scale (degrees: root, m3, P5, m6) — e.g. root – m3 – P5 – m3 and root – P5 – m6 – P5 — keeping the characteristic semitone intervals of the scale in the foreground.
+**Tempo and chords.** BPM sits between 95 and 119 — moderately fast and celebratory. Chord progressions are drawn from the Yo pentatonic scale using circular I–IV–V movements (e.g. root – P4 – P5 – P4, root – P5 – M6 – P5) that feel perpetually in forward motion without a strong Western resolve.
 
-**Scale.** Like medieval mode, koto uses a different melodic scale: Hirajoshi pentatonic `[0, 2, 3, 7, 8]` (root, M2, m3, P5, m6). The minor third (one semitone above the major second) and the minor sixth (one semitone above the perfect fifth) are the intervals that give Japanese koto music its instantly recognisable sound. The melody walking algorithm runs on this scale, so every step and harmony note is drawn from it.
+**Scale.** Koto uses the Yo pentatonic `[0, 2, 5, 7, 9]` (root, M2, P4, P5, M6) — the bright, open Japanese folk scale used in matsuri music. Unlike the darker Hirajoshi scale (which has a m3 and m6), Yo has only major and perfect intervals, giving every phrase an unambiguously upbeat character. The melody walking algorithm runs on this scale, so every step and harmony note is drawn from it.
 
-**Melody — Karplus-Strong synthesis.** A delay line of length `sample_rate / frequency` is initialised with deterministic pseudo-random noise seeded from the note pitch, then on every sample the output is the average of the current and the previous delay-line value. This one-pole averaging filter damps high-frequency energy faster than low-frequency energy on each pass through the buffer, so the initial noisy burst decays into a near-pure tone over time — exactly what happens when a string vibrates and loses energy to friction. Because higher notes have shorter delay lines, they complete more filter passes per unit time and decay faster; lower notes ring longer. No explicit envelope is needed: the decay is a natural consequence of the physics. A 10 ms linear fade-out is applied only at the very end of the note window to prevent a click at the boundary.
+**Melody — Karplus-Strong synthesis.** A delay line of length `sample_rate / frequency` is initialised with deterministic pseudo-random noise seeded from the note pitch, then on every sample the output is the average of the current and the previous delay-line value. This one-pole averaging filter damps high-frequency energy faster than low-frequency energy on each pass through the buffer, so the initial noisy burst decays into a near-pure tone over time — exactly what happens when a string vibrates and loses energy to friction. Because higher notes have shorter delay lines, they complete more filter passes per unit time and decay faster; lower notes ring longer. No explicit envelope is needed: the decay is a natural consequence of the physics. A faint octave partial (a second KS voice at twice the frequency, amplitude 0.08) adds the upper-harmonic brightness of high-tension festival strings — audible as a brief shimmer at the note attack that vanishes as the fundamental sustains. A 10 ms linear fade-out is applied only at the very end of the note window to prevent a click at the boundary.
 
 **Bass.** A second Karplus-Strong voice at the bass register. The longer delay line at lower pitches means the bass strings ring noticeably longer than the melody strings, naturally providing a sustained, resonant low-end under the plucked melody.
 
-**Percussion.** Kept very minimal so as not to compete with the delicate plucked texture:
-- *Taiko kick* — a pitched sine at ~78–96 Hz, moderate amplitude, rounded 80 ms decay.
-- *Hand percussion* — noise + 200 Hz body tone at very low amplitude (6–12 %). Barely audible on non-accented steps.
-- *Shimmer* — tiny noise bursts at 3–5 % amplitude, under 12 ms. Essentially inaudible; they exist only to avoid complete silence on hat steps.
+**Percussion.** More prominent than in contemplative koto styles, reflecting the festival context:
+- *Taiko kick* — a pitched sine at 78–96 Hz (55 % amplitude) layered with a 50 Hz sub-bass sine (25 %) for physical low-end weight. Decay ~120 ms. Significantly louder than the solo-koto version.
+- *Hand percussion* — noise + 200 Hz body tone at 6–12 %. Restrained, keeps the strings in focus.
+- *Kane bell* — two sines at an inharmonic 1 : 2.4 frequency ratio (fundamental 1 250–1 450 Hz) produce the struck-metal ring of a small Japanese kane bell. Closed hits decay in ~25 ms; open-hat steps ring for ~80 ms with a brief sustain.
 
 ### Toy mode
 

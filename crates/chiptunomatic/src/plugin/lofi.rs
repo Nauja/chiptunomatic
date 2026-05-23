@@ -1,5 +1,6 @@
-use crate::plugin::{Plugin, String, Vec};
-use crate::synth::{fm_sine, karplus_strong, midi_to_hz, pitch_sweep_sine, sine};
+use crate::plugin::chiptune::classical_section_defs_from_seed;
+use crate::plugin::{Plugin, SectionDef, String, Vec};
+use crate::synth::{fm_sine, midi_to_hz, pitch_sweep_sine, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
@@ -7,8 +8,8 @@ use crate::{
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
-pub const LOFI_BPM_BASE: i32 = 78;
-pub const LOFI_BPM_VARIATION: i32 = 8; // (seed >> 8) % 8 → 0..7, centre at 4 → 74–81 BPM
+pub const LOFI_BPM_BASE: i32 = 99;
+pub const LOFI_BPM_VARIATION: i32 = 18; // (seed >> 8) % 18 → 0..17, centre at 9 → 90–108 BPM
 
 /// Jazz-flavoured 4-chord loops for lofi mode. Degree indices into [`PENTATONIC_MINOR`].
 /// Pentatonic minor degrees: 0=root, 1=m3, 2=P4, 3=P5, 4=m7 — enough for jazzy feel.
@@ -19,8 +20,8 @@ pub const LOFI_CHORD_PROGRESSIONS: [[usize; 4]; 4] = [
     [0, 2, 3, 1], // i – P4 – P5 – m3
 ];
 
-/// Use lofi synthesis (FM sine waves, slower BPM, jazz chords).
-/// FM sine waves, 74–82 BPM, jazz-flavoured chord progressions
+/// Use lofi synthesis (FM sine waves, lofi hip-hop BPM, jazz chords).
+/// FM sine waves, 90–108 BPM, jazz-flavoured chord progressions
 #[derive(Debug, Clone)]
 pub struct LofiPlugin {}
 
@@ -33,6 +34,10 @@ impl Plugin for LofiPlugin {
         String::from("lofi")
     }
 
+    fn has_sfx(&self) -> bool {
+        true
+    }
+
     fn chord_progression_from_seed(&self, seed: u32) -> Vec<usize> {
         let idx = (seed as usize) % LOFI_CHORD_PROGRESSIONS.len();
         LOFI_CHORD_PROGRESSIONS[idx].to_vec()
@@ -40,7 +45,7 @@ impl Plugin for LofiPlugin {
 
     fn tempo_from_seed(&self, seed: u32) -> i32 {
         let variation = ((seed >> 8) % LOFI_BPM_VARIATION as u32) as i32 - LOFI_BPM_VARIATION / 2;
-        LOFI_BPM_BASE + variation // 74–82
+        LOFI_BPM_BASE + variation // 90–108
     }
 
     fn sample_melody_note(&self, note: MelodyNote, sample_rate: u32) -> Vec<StemSample> {
@@ -50,7 +55,10 @@ impl Plugin for LofiPlugin {
             return Vec::new();
         }
         let dur = total as f64 / sr;
-        let hz = midi_to_hz(note.midi);
+        // Shift melody down one octave — lofi Rhodes sits in the C3–C4 range,
+        // not the default C4–C5 that the generator walks into.
+        let hz = midi_to_hz(note.midi - 12.0);
+        let harm_hz = midi_to_hz(note.harmony_midi - 12.0);
 
         // Rhodes tine: two FM layers reproduce the characteristic bright-then-warm
         // transition of a struck metal tine.
@@ -62,14 +70,14 @@ impl Plugin for LofiPlugin {
         let tine_body = fm_sine(sr, hz, dur, 0.20, 2.0, 0.45);
         let tine_body = envelope(sr, &tine_body, 0.003, 0.10, 0.55, 0.12);
         // Harmony voice (body only, quieter)
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.09, 2.0, 0.45);
+        let harm = fm_sine(sr, harm_hz, dur, 0.09, 2.0, 0.45);
         let harm = envelope(sr, &harm, 0.003, 0.10, 0.55, 0.12);
 
         // Warm brass pad on the harmony pitch: FM 1:1 mod ratio, β=1.8 gives the
         // characteristic closed, buzzy spectrum of a muted brass section.  The slow
         // 40 ms attack lets it swell in under the Rhodes rather than competing with
         // the tine's attack transient.
-        let brass = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.11, 1.0, 1.8);
+        let brass = fm_sine(sr, harm_hz, dur, 0.11, 1.0, 1.8);
         let brass = envelope(sr, &brass, 0.040, 0.08, 0.65, 0.15);
 
         // Lead flute: near-pure additive tone on the melody pitch.
@@ -77,8 +85,8 @@ impl Plugin for LofiPlugin {
         // add the slight cylindrical-bore colour without FM metallic artefacts.
         // The 20 ms attack mimics breath building up before the tone speaks fully.
         let flute_f = sine(sr, hz, dur, 0.16);
-        let flute_h2 = sine(sr, hz * 2.0, dur, 0.028);
-        let flute_h3 = sine(sr, hz * 3.0, dur, 0.009);
+        let flute_h2 = sine(sr, hz * 2.0, dur, 0.012);
+        let flute_h3 = sine(sr, hz * 3.0, dur, 0.004);
         let flute_sum: alloc::vec::Vec<f32> = (0..total)
             .map(|i| {
                 flute_f.get(i).copied().unwrap_or(0.0)
@@ -88,13 +96,18 @@ impl Plugin for LofiPlugin {
             .collect();
         let flute = envelope(sr, &flute_sum, 0.020, 0.060, 0.85, 0.12);
 
+        // Soft atmospheric pad — slow-attack FM tone that swells in under the Rhodes.
+        let pad = fm_sine(sr, harm_hz, dur, 0.055, 1.0, 0.70);
+        let pad = envelope(sr, &pad, 0.080, 0.0, 0.65, 0.18);
+
         (0..total)
             .map(|i| StemSample {
                 value: tine_attack.get(i).copied().unwrap_or(0.0)
                     + tine_body.get(i).copied().unwrap_or(0.0)
                     + harm.get(i).copied().unwrap_or(0.0)
                     + brass.get(i).copied().unwrap_or(0.0)
-                    + flute.get(i).copied().unwrap_or(0.0),
+                    + flute.get(i).copied().unwrap_or(0.0)
+                    + pad.get(i).copied().unwrap_or(0.0),
                 byte_index: note.byte_index,
             })
             .collect()
@@ -109,29 +122,73 @@ impl Plugin for LofiPlugin {
         let dur = total as f64 / sr;
         let hz = midi_to_hz(note.midi);
 
-        // Three strings voiced as an open guitar chord: root, perfect fifth, octave.
-        // Each KS voice is seeded from its own period (different frequency → different
-        // LCG state), so they sound like distinct strings rather than copies.
-        // The 8 ms attack ramp (sustain=1.0, decay=0) replaces the hard KS click
-        // with a mellow pluck onset while leaving the natural KS decay untouched.
-        let s1 = karplus_strong(sr, hz, dur, 0.20);
-        let s1 = envelope(sr, &s1, 0.008, 0.0, 1.0, 0.0);
-        let s2 = karplus_strong(sr, hz * 1.4983, dur, 0.11); // perfect fifth
-        let s2 = envelope(sr, &s2, 0.008, 0.0, 1.0, 0.0);
-        let s3 = karplus_strong(sr, hz * 2.0, dur, 0.05); // octave
-        let s3 = envelope(sr, &s3, 0.008, 0.0, 1.0, 0.0);
-
-        // Warm sine at the root reinforces the fundamental and rounds off the
-        // high-frequency KS noise, keeping the overall timbre mellow.
-        let body = sine(sr, hz, dur, 0.10);
-        let body = envelope(sr, &body, 0.010, 0.12, 0.45, 0.08);
+        // Warm electric bass: FM at low β gives the slight low-mid roundness of a
+        // neck-picked electric without adding high-frequency brightness.
+        let body = fm_sine(sr, hz, dur, 0.28, 2.0, 0.30);
+        let body = envelope(sr, &body, 0.005, 0.09, 0.55, 0.12);
+        // Sub-octave adds weight without brightness — characteristic of lofi hip-hop bass.
+        let sub = sine(sr, hz * 0.5, dur, 0.12);
+        let sub = envelope(sr, &sub, 0.005, 0.12, 0.50, 0.15);
 
         (0..total)
             .map(|i| StemSample {
-                value: s1.get(i).copied().unwrap_or(0.0)
-                    + s2.get(i).copied().unwrap_or(0.0)
-                    + s3.get(i).copied().unwrap_or(0.0)
-                    + body.get(i).copied().unwrap_or(0.0),
+                value: body.get(i).copied().unwrap_or(0.0) + sub.get(i).copied().unwrap_or(0.0),
+                byte_index: note.byte_index,
+            })
+            .collect()
+    }
+
+    fn sample_sfx_note(&self, note: MelodyNote, sample_rate: u32) -> Vec<StemSample> {
+        let sr = sample_rate as f64;
+        let total = (sr * note.duration).floor() as usize;
+        if total == 0 {
+            return Vec::new();
+        }
+
+        let seed = note.byte_index as u64;
+
+        // Tape hiss: chained LCG so each sample feeds the next, giving proper
+        // white-noise statistics across the full note duration.
+        let mut state = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let mut out: alloc::vec::Vec<f32> = (0..total)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 33) as f32 / 2147483648.0_f32 * 2.0 - 1.0) * 0.006
+            })
+            .collect();
+
+        // Vinyl crackle: ~8 % of notes get a short sharp pop at the note start.
+        let h = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        if (h >> 33) as f32 / 2147483648.0_f32 < 0.08 {
+            let amp = 0.15 + ((h >> 17) & 0xFF) as f32 / 255.0 * 0.08; // 0.15–0.23
+            let dur = 0.002 + ((h >> 9) & 0xFF) as f64 / 255.0 * 0.003; // 2–5 ms
+            let n = (sr * dur).floor() as usize;
+            let raw: alloc::vec::Vec<f32> = (0..n)
+                .map(|i| {
+                    let a = seed
+                        .wrapping_add(i as u64 ^ 0xDEAD_BEEF)
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    ((a >> 33) as f32 / 2147483648.0_f32 * 2.0 - 1.0) * amp
+                })
+                .collect();
+            let shaped = envelope(sr, &raw, 0.0, dur * 0.6, 0.0, dur * 0.4);
+            for (i, &v) in shaped.iter().enumerate() {
+                if i < out.len() {
+                    out[i] += v;
+                }
+            }
+        }
+
+        out.iter()
+            .map(|&v| StemSample {
+                value: v,
                 byte_index: note.byte_index,
             })
             .collect()
@@ -179,27 +236,17 @@ impl Plugin for LofiPlugin {
                 samples,
             );
         }
+    }
 
-        // Continuous tape hiss present on every step, including silent ones.
-        // samples is pre-sized with zeros by DrumSampleGenerator, so overlay
-        // works even when no kick/snare/hat fired.
-        let hiss = noise_burst(
-            config.sample_rate,
-            config.random,
-            config.step_duration,
-            0.014,
-        );
-        overlay_samples(&hiss, samples);
-
-        // Random vinyl crackle: ~8 % of steps get a short sharp pop at the
-        // start of the step window.  Amplitude and duration vary so no two
-        // crackles sound identical.
-        if config.random.next_float() < 0.08 {
-            let amp = 0.07 + config.random.next_float() * 0.09; // 0.07–0.16
-            let dur = 0.002 + config.random.next_float() as f64 * 0.003; // 2–5 ms
-            let crackle = noise_burst(config.sample_rate, config.random, dur, amp);
-            let crackle = envelope(config.sample_rate, &crackle, 0.0, dur * 0.6, 0.0, dur * 0.4);
-            overlay_samples(&crackle, samples);
-        }
+    fn section_defs_from_seed(&self, seed: u32) -> Vec<SectionDef> {
+        // Use the typical music structure from the chiptune mode
+        classical_section_defs_from_seed(seed)
+            .iter_mut()
+            .map(|s| {
+                // Activate the SFX stem on all sections as this is the vinyl crackle
+                s.stems.sfx = true;
+                *s
+            })
+            .collect()
     }
 }

@@ -5,7 +5,6 @@ use crate::{
     BassNote, DrumStep, MelodyNote, SampleStem, SquareNote, StemSample, TriangleNote,
 };
 
-
 /// Square + triangle waves, 100–140 BPM, pentatonic minor.
 #[derive(Debug, Clone)]
 pub struct ChiptunePlugin {}
@@ -120,8 +119,22 @@ impl Plugin for ChiptunePlugin {
             0 => {
                 // Coin: two sharp metallic pings — no sustain, instant decay, high register.
                 // The zero-sustain percussive envelope is what distinguishes it from held notes.
-                let mut out = envelope(sr, &square(sr, 1047.0, 0.035, 0.45, 0.5), 0.0, 0.012, 0.0, 0.006);
-                out.extend(envelope(sr, &square(sr, 1568.0, 0.055, 0.45, 0.5), 0.0, 0.018, 0.0, 0.008));
+                let mut out = envelope(
+                    sr,
+                    &square(sr, 1047.0, 0.035, 0.45, 0.5),
+                    0.0,
+                    0.012,
+                    0.0,
+                    0.006,
+                );
+                out.extend(envelope(
+                    sr,
+                    &square(sr, 1568.0, 0.055, 0.45, 0.5),
+                    0.0,
+                    0.018,
+                    0.0,
+                    0.008,
+                ));
                 out
             }
             1 => {
@@ -133,10 +146,19 @@ impl Plugin for ChiptunePlugin {
             2 => {
                 // Power-up: 10-note rapid ascending arpeggio across 3 octaves (C3 → C6).
                 // Each step only 18 ms so the whole thing sounds like a continuous rising sweep.
-                let freqs = [131.0f64, 165.0, 196.0, 262.0, 330.0, 392.0, 523.0, 659.0, 784.0, 1047.0];
+                let freqs = [
+                    131.0f64, 165.0, 196.0, 262.0, 330.0, 392.0, 523.0, 659.0, 784.0, 1047.0,
+                ];
                 let mut out = Vec::new();
                 for &f in &freqs {
-                    out.extend(envelope(sr, &square(sr, f, 0.018, 0.40, 0.5), 0.001, 0.004, 0.75, 0.004));
+                    out.extend(envelope(
+                        sr,
+                        &square(sr, f, 0.018, 0.40, 0.5),
+                        0.001,
+                        0.004,
+                        0.75,
+                        0.004,
+                    ));
                 }
                 out
             }
@@ -150,22 +172,32 @@ impl Plugin for ChiptunePlugin {
                 // 1-UP: E5–G5–E6–C6–D6–G6 with short-short-long rhythmic pattern.
                 // The recognisable melodic phrase and rhythmic variation set it apart from sweeps.
                 let notes: &[(f64, f64)] = &[
-                    (659.0, 0.055), // E5
-                    (784.0, 0.055), // G5
-                    (1319.0, 0.11), // E6  ← held longer (short-short-LONG pattern)
-                    (1047.0, 0.055),// C6
-                    (1175.0, 0.055),// D6
-                    (1568.0, 0.18), // G6  ← held longer
+                    (659.0, 0.055),  // E5
+                    (784.0, 0.055),  // G5
+                    (1319.0, 0.11),  // E6  ← held longer (short-short-LONG pattern)
+                    (1047.0, 0.055), // C6
+                    (1175.0, 0.055), // D6
+                    (1568.0, 0.18),  // G6  ← held longer
                 ];
                 let mut out = Vec::new();
                 for &(f, d) in notes {
-                    out.extend(envelope(sr, &square(sr, f, d, 0.35, 0.5), 0.002, 0.012, 0.80, 0.018));
+                    out.extend(envelope(
+                        sr,
+                        &square(sr, f, d, 0.35, 0.5),
+                        0.002,
+                        0.012,
+                        0.80,
+                        0.018,
+                    ));
                 }
                 out
             }
         };
         raw.iter()
-            .map(|&v| StemSample { value: v, byte_index: note.byte_index })
+            .map(|&v| StemSample {
+                value: v,
+                byte_index: note.byte_index,
+            })
             .collect()
     }
 
@@ -206,74 +238,105 @@ impl Plugin for ChiptunePlugin {
     }
 
     fn section_defs_from_seed(&self, seed: u32) -> Vec<SectionDef> {
-        // Use bits 16+ of root_seed (bits 0-3 = root note, 8-12 = BPM variation).
-
-        // Bits 16-17: verse beats — 24 (25%), 28 (25%), 32 (50%)
-        let verse_beats: u64 = match (seed >> 16) & 3 {
-            0 => 24,
-            1 => 28,
-            _ => 32,
-        };
-        // Bit 18: intro/outro length — 8 or 16 beats
-        let bookend_beats: u64 = if (seed >> 18) & 1 == 0 { 16 } else { 8 };
-        // Bit 19: pre-chorus length — 12 or 16 beats
-        let prechorus_beats: u64 = if (seed >> 19) & 1 == 0 { 16 } else { 12 };
-        // Bit 20: chorus length — 28 or 32 beats
-        let chorus_beats: u64 = if (seed >> 20) & 1 == 0 { 32 } else { 28 };
-        // Bits 21-22: silence after each chorus — 0.3 / 0.5 / 0.7 / 1.0 s
-        let chorus_silence: f64 = [0.3, 0.5, 0.7, 1.0][((seed >> 21) & 3) as usize];
-        // Bit 23: voice active in verse (25% chance by requiring 2 bits both set)
-        let voice_in_verse = (seed >> 23) & 3 == 3;
-        // Bit 25: bridge present or absent
-        let has_bridge = (seed >> 25) & 1 == 0;
-        // Bit 26: bridge length — 12 or 16 beats
-        let bridge_beats: u64 = if (seed >> 26) & 1 == 0 { 16 } else { 12 };
-
-        let intro = SectionDef {
-            beats: bookend_beats,
-            stems: StemMask { voice: false, square: true, triangle: true, noise: false, sfx: false },
-            silence_after: 0.8,
-        };
-        let verse = SectionDef {
-            beats: verse_beats,
-            stems: StemMask { voice: voice_in_verse, square: true, triangle: true, noise: true, sfx: true },
-            silence_after: 0.0,
-        };
-        let pre_chorus = SectionDef {
-            beats: prechorus_beats,
-            stems: StemMask::ALL,
-            silence_after: 0.0,
-        };
-        let chorus = SectionDef {
-            beats: chorus_beats,
-            stems: StemMask::ALL,
-            silence_after: chorus_silence,
-        };
-        let bridge = SectionDef {
-            beats: bridge_beats,
-            stems: StemMask { voice: false, square: false, triangle: true, noise: true, sfx: false },
-            silence_after: 0.8,
-        };
-        let outro = SectionDef {
-            beats: bookend_beats,
-            stems: StemMask { voice: false, square: true, triangle: true, noise: false, sfx: false },
-            silence_after: 1.5,
-        };
-
-        // intro → verse → pre-chorus → chorus → verse → pre-chorus → chorus → [bridge →] chorus → outro
-        let mut sections = Vec::new();
-        sections.push(intro);
-        sections.push(verse);
-        sections.push(pre_chorus);
-        sections.push(chorus);
-        sections.push(verse);
-        sections.push(pre_chorus);
-        sections.push(chorus);
-        if has_bridge {
-            sections.push(bridge);
-        }
-        sections.push(SectionDef { silence_after: 0.0, ..chorus });
-        sections.push(outro);
-        sections
+        classical_section_defs_from_seed(seed)
     }
+}
+
+pub(crate) fn classical_section_defs_from_seed(seed: u32) -> Vec<SectionDef> {
+    // Use bits 16+ of root_seed (bits 0-3 = root note, 8-12 = BPM variation).
+
+    // Bits 16-17: verse beats — 24 (25%), 28 (25%), 32 (50%)
+    let verse_beats: u64 = match (seed >> 16) & 3 {
+        0 => 24,
+        1 => 28,
+        _ => 32,
+    };
+    // Bit 18: intro/outro length — 8 or 16 beats
+    let bookend_beats: u64 = if (seed >> 18) & 1 == 0 { 16 } else { 8 };
+    // Bit 19: pre-chorus length — 12 or 16 beats
+    let prechorus_beats: u64 = if (seed >> 19) & 1 == 0 { 16 } else { 12 };
+    // Bit 20: chorus length — 28 or 32 beats
+    let chorus_beats: u64 = if (seed >> 20) & 1 == 0 { 32 } else { 28 };
+    // Bits 21-22: silence after each chorus — 0.3 / 0.5 / 0.7 / 1.0 s
+    let chorus_silence: f64 = [0.3, 0.5, 0.7, 1.0][((seed >> 21) & 3) as usize];
+    // Bit 23: voice active in verse (25% chance by requiring 2 bits both set)
+    let voice_in_verse = (seed >> 23) & 3 == 3;
+    // Bit 25: bridge present or absent
+    let has_bridge = (seed >> 25) & 1 == 0;
+    // Bit 26: bridge length — 12 or 16 beats
+    let bridge_beats: u64 = if (seed >> 26) & 1 == 0 { 16 } else { 12 };
+
+    let intro = SectionDef {
+        beats: bookend_beats,
+        stems: StemMask {
+            voice: false,
+            square: true,
+            triangle: true,
+            noise: false,
+            sfx: false,
+        },
+        silence_after: 0.8,
+    };
+    let verse = SectionDef {
+        beats: verse_beats,
+        stems: StemMask {
+            voice: voice_in_verse,
+            square: true,
+            triangle: true,
+            noise: true,
+            sfx: true,
+        },
+        silence_after: 0.0,
+    };
+    let pre_chorus = SectionDef {
+        beats: prechorus_beats,
+        stems: StemMask::ALL,
+        silence_after: 0.0,
+    };
+    let chorus = SectionDef {
+        beats: chorus_beats,
+        stems: StemMask::ALL,
+        silence_after: chorus_silence,
+    };
+    let bridge = SectionDef {
+        beats: bridge_beats,
+        stems: StemMask {
+            voice: false,
+            square: false,
+            triangle: true,
+            noise: true,
+            sfx: false,
+        },
+        silence_after: 0.8,
+    };
+    let outro = SectionDef {
+        beats: bookend_beats,
+        stems: StemMask {
+            voice: false,
+            square: true,
+            triangle: true,
+            noise: false,
+            sfx: false,
+        },
+        silence_after: 1.5,
+    };
+
+    // intro → verse → pre-chorus → chorus → verse → pre-chorus → chorus → [bridge →] chorus → outro
+    let mut sections = Vec::new();
+    sections.push(intro);
+    sections.push(verse);
+    sections.push(pre_chorus);
+    sections.push(chorus);
+    sections.push(verse);
+    sections.push(pre_chorus);
+    sections.push(chorus);
+    if has_bridge {
+        sections.push(bridge);
+    }
+    sections.push(SectionDef {
+        silence_after: 0.0,
+        ..chorus
+    });
+    sections.push(outro);
+    sections
 }

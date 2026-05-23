@@ -9,6 +9,7 @@ use crate::constants::{NOTE_NAMES, PENTATONIC_MINOR, SAMPLE_RATE};
 use crate::consumer::Consume;
 use crate::plugin::chiptune::ChiptunePlugin;
 use crate::plugin::koto::KotoPlugin;
+use crate::plugin::lofi::LofiPlugin;
 use crate::plugin::metal::MetalPlugin;
 use crate::plugin::rap::RapPlugin;
 use crate::plugin::rock::RockPlugin;
@@ -151,6 +152,7 @@ impl Chiptunomatic {
     pub fn with_plugins_from_list(mut self, modes: &[String]) -> Result<Self, ChiptunomaticError> {
         let all: Vec<Box<dyn Plugin>> = alloc::vec![
             Box::new(ChiptunePlugin::new()),
+            Box::new(LofiPlugin {}),
             Box::new(RockPlugin {}),
             Box::new(MetalPlugin {}),
             Box::new(RapPlugin {}),
@@ -178,7 +180,7 @@ impl Chiptunomatic {
     }
 
     pub fn register_default_plugins(&mut self) {
-        // self.register_plugin(Rc::new(LofiPlugin {}));
+        self.register_plugin(Box::new(LofiPlugin {}));
         self.register_plugin(Box::new(RockPlugin {}));
         self.register_plugin(Box::new(MetalPlugin {}));
         // self.register_plugin(Rc::new(PersianPlugin {}));
