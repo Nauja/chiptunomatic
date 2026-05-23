@@ -348,7 +348,7 @@ fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io
     Ok(())
 }
 
-pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<()> {
+pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>, initial_autoplay: bool) -> Result<()> {
     let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
     let live_generation = Arc::new(AtomicU64::new(0));
     let live_gen_worker = Arc::clone(&live_generation);
@@ -420,7 +420,7 @@ pub fn run(mut instance: Chiptunomatic, initial_file: Option<&Path>) -> Result<(
     };
 
     let mut focused_button: Option<FocusedButton> = None;
-    let mut autoplay = false;
+    let mut autoplay = initial_autoplay;
     let mut last_sel: Option<PathBuf> = None;
     let mut meta_title: String = "Song".into();
     let mut meta_text: Text<'static> = Text::from(vec![

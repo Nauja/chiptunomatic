@@ -76,46 +76,94 @@ chiptunomatic [FILE] [OPTIONS]
 | Open TUI with file browser | `chiptunomatic` |
 | Export to WAV and exit | `chiptunomatic path/to/file -o out.wav` |
 | Print song metadata and exit | `chiptunomatic path/to/file --info` |
-| Play in lofi mode | `chiptunomatic path/to/file -m lofi` |
 | Play in rock mode | `chiptunomatic path/to/file -m rock` |
 | Play in metal mode | `chiptunomatic path/to/file -m metal` |
-| Play in persian mode | `chiptunomatic path/to/file -m persian` |
 | Play in trap mode | `chiptunomatic path/to/file -m trap` |
 | Play in rap mode | `chiptunomatic path/to/file -m rap` |
-| Play in medieval mode | `chiptunomatic path/to/file -m medieval` |
 | Play in koto mode | `chiptunomatic path/to/file -m koto` |
 | Play in toy mode | `chiptunomatic path/to/file -m toy` |
 | Play in samba mode | `chiptunomatic path/to/file -m samba` |
-| Solo the square stem | `chiptunomatic path/to/file --square-solo` |
-| Mute the noise stem | `chiptunomatic path/to/file --noise-muted` |
 
 **Options**
 
 ```
--o, --output <FILE>        Write generated audio to a WAV file and exit
-    --info                 Print metadata for the input file and exit
--m, --mode <MODE>          Music mode: chiptune (default), lofi, rock, metal, persian, trap, rap, medieval, koto, toy, samba
-    --volume <FLOAT>       Master playback volume (default: 0.25)
-    --muted                Mute master output
-
-    --voice-volume <FLOAT> Voice stem volume multiplier (default: 1.0)
-    --voice-muted          Mute the voice stem
-    --voice-solo           Solo the voice stem (silences all other stems)
-
-    --square-volume <FLOAT> Square (melody) stem volume multiplier (default: 1.0)
-    --square-muted          Mute the square stem
-    --square-solo           Solo the square stem
-
-    --triangle-volume <FLOAT> Triangle (bass) stem volume multiplier (default: 1.0)
-    --triangle-muted          Mute the triangle stem
-    --triangle-solo           Solo the triangle stem
-
-    --noise-volume <FLOAT> Noise (drum) stem volume multiplier (default: 1.0)
-    --noise-muted          Mute the noise stem
-    --noise-solo           Solo the noise stem
+-o, --output <FILE>   Write generated audio to a WAV file and exit
+    --info            Print metadata for the input file and exit
+-m, --mode <MODE>     Music mode: chiptune (default), rock, metal, rap, trap, toy, samba, koto
+    --volume <FLOAT>  Master playback volume (default: 0.25)
+    --muted           Mute master output
+    --config <FILE>   Path to a custom config file
+    --autoplay        Start with autoplay enabled
 ```
 
-Multiple solos are additive — if `--square-solo` and `--triangle-solo` are both set, only those two stems are heard.
+Per-stem settings (volume, mute, solo) are configured through the [config file](#config-file).
+
+### Config file
+
+On first run the CLI creates a commented-out default config at:
+
+| Platform | Path |
+|---|---|
+| Linux / macOS | `~/.config/chiptunomatic/config.yml` |
+| Windows | `%LOCALAPPDATA%\chiptunomatic\config.yml` |
+
+All fields are optional. Uncomment and edit the ones you want to change:
+
+```yaml
+# Enabled music modes (at least one required).
+# Comment out the whole block to enable all modes.
+#modes:
+#  - chiptune
+#  - rock
+#  - metal
+#  - rap
+#  - trap
+#  - toy
+#  - samba
+#  - koto
+
+# Default music mode (must be one of the enabled modes above)
+#mode: chiptune
+
+# Start with autoplay enabled (automatically advance to the next file when playback ends)
+#autoplay: false
+
+# Master volume (0.0 = silent, 1.0 = full)
+#volume: 0.25
+
+# Mute master output
+#muted: false
+
+# Per-stem settings
+#voice:
+#  volume: 1.0
+#  muted: false
+#  solo: false
+
+#square:
+#  volume: 1.0
+#  muted: false
+#  solo: false
+
+#triangle:
+#  volume: 1.0
+#  muted: false
+#  solo: false
+
+#noise:
+#  volume: 1.0
+#  muted: false
+#  solo: false
+
+#sfx:
+#  volume: 1.0
+#  muted: false
+#  solo: false
+```
+
+The `modes` list restricts which modes are available in the TUI's mode switcher (`m` / `Shift+M`). If omitted, all modes are enabled. At least one valid mode name must be listed — the CLI exits with an error otherwise.
+
+CLI flags (`--volume`, `--muted`, `--mode`) override the config file. Multiple solos are additive — if both `square` and `triangle` are soloed, only those two stems are heard.
 
 ### TUI key bindings
 

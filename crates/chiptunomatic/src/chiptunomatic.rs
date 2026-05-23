@@ -144,6 +144,34 @@ impl Chiptunomatic {
         other
     }
 
+    /// Rebuild the plugin list from a set of mode name strings.
+    /// Only modes whose names appear in `modes` are kept.
+    /// The active plugin is reset to the first match if the current one is excluded.
+    /// Returns `Err` if no valid mode name is found in `modes`.
+    pub fn with_plugins_from_list(mut self, modes: &[String]) -> Result<Self, ChiptunomaticError> {
+        let all: Vec<Box<dyn Plugin>> = alloc::vec![
+            Box::new(ChiptunePlugin::new()),
+            Box::new(RockPlugin {}),
+            Box::new(MetalPlugin {}),
+            Box::new(RapPlugin {}),
+            Box::new(TrapPlugin {}),
+            Box::new(ToyPlugin {}),
+            Box::new(SambaPlugin {}),
+            Box::new(KotoPlugin {}),
+        ];
+        self.plugins = all
+            .into_iter()
+            .filter(|p| modes.iter().any(|m| m == p.mode()))
+            .collect();
+        if self.plugins.is_empty() {
+            return Err(ChiptunomaticError::InvalidMode(modes.join(", ")));
+        }
+        if !self.plugins.iter().any(|p| p.mode() == self.plugin.mode()) {
+            self.plugin = self.plugins[0].clone();
+        }
+        Ok(self)
+    }
+
     pub fn register_plugin(&mut self, plugin: Box<dyn Plugin>) -> &mut Self {
         self.plugins.push(plugin);
         self
