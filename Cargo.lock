@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "chiptunomatic-cli"
-version = "0.3.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chiptunomatic",
