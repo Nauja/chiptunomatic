@@ -11,5 +11,8 @@ description = "WebAssembly bindings for chiptunomatic (incremental synthesis for
 crate-type = ["cdylib"]
 
 [dependencies]
-chiptunomatic = { path = "../chiptunomatic", default-features = false, features = ["js", "std", "arpeggio"] }
+chiptunomatic = { path = "../chiptunomatic", default-features = false, features = [
+    "js",
+    "std",
+] }
 wasm-bindgen = "0.2.120"

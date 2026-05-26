@@ -1,9 +1,6 @@
 use core::fmt::Debug;
 
 use dyn_clone::DynClone;
-#[cfg(feature = "std")]
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 
 /// Hide the generic Rng object
 pub trait Random: Debug + DynClone + Send {
@@ -25,33 +22,42 @@ impl Random for NoRandom {
     }
 }
 
-/// Random implementation using StdRng
 #[cfg(feature = "std")]
-#[derive(Debug, Clone)]
-pub struct StdRandom {
-    rng: StdRng,
-}
+mod std {
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
-impl Random for StdRandom {
-    fn set_seed(&mut self, seed: u64) {
-        self.rng = StdRng::seed_from_u64(seed);
+    use crate::random::Random;
+
+    /// Random implementation using StdRng
+    #[derive(Debug, Clone)]
+    pub struct StdRandom {
+        rng: StdRng,
     }
 
-    fn next_float(&mut self) -> f32 {
-        self.rng.gen::<f32>()
-    }
-}
+    impl Random for StdRandom {
+        fn set_seed(&mut self, seed: u64) {
+            self.rng = StdRng::seed_from_u64(seed);
+        }
 
-impl StdRandom {
-    pub fn new() -> Self {
-        Self {
-            rng: StdRng::from_entropy(),
+        fn next_float(&mut self) -> f32 {
+            self.rng.gen::<f32>()
         }
     }
 
-    pub fn with_seed(self, seed: u64) -> Self {
-        Self {
-            rng: StdRng::seed_from_u64(seed),
+    impl StdRandom {
+        pub fn new() -> Self {
+            Self {
+                rng: StdRng::from_entropy(),
+            }
+        }
+
+        pub fn with_seed(self, seed: u64) -> Self {
+            Self {
+                rng: StdRng::seed_from_u64(seed),
+            }
         }
     }
 }
+
+#[cfg(feature = "std")]
+pub use std::*;

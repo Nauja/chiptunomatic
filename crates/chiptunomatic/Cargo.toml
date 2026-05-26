@@ -13,12 +13,11 @@ description = "Deterministic chiptune generator from binary input (WASM-compatib
 crate-type = ["rlib"]
 
 [features]
-default = ["std", "wav", "arpeggio"]
+default = ["std", "wav"]
 std = ["rand/std", "rand/std_rng"]
 # Enables getrandom's `js` backend (needed on wasm32-unknown-unknown in JS hosts). See https://docs.rs/getrandom#webassembly-support
 js = ["dep:getrandom", "getrandom/js"]
 wav = ["dep:hound", "std"]
-arpeggio = []
 
 [dependencies]
 sha2 = "0.10"

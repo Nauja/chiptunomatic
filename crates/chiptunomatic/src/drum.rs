@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use alloc::collections::VecDeque;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
