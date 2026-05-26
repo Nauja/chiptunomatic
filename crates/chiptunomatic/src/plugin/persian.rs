@@ -3,7 +3,7 @@ use crate::synth::{fm_sine, karplus_strong, midi_to_hz, sine, vibrato_sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -215,7 +215,7 @@ impl Plugin for PersianPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Tombak "dom" — open low stroke: warm membrane resonance + membrane snap.
             // Fundamental ~155 Hz (tombak goblet body), brief noise for the stick attack.
@@ -224,7 +224,7 @@ impl Plugin for PersianPlugin {
             let body = sine(config.sample_rate, dom_hz, dur_k, 0.48);
             let snap = noise_burst(
                 config.sample_rate,
-                &config.random,
+                config.random,
                 (0.018_f64).min(dur_k),
                 0.18,
             );
@@ -243,7 +243,7 @@ impl Plugin for PersianPlugin {
             let tak_hz = 615.0 + f64::from(config.color % 90);
             let dur_t = (0.040_f64).min(config.step_duration * 0.55);
             let body = sine(config.sample_rate, tak_hz, dur_t, 0.20);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_t, 0.14);
+            let noise = noise_burst(config.sample_rate, config.random, dur_t, 0.14);
             overlay_samples(
                 &envelope(config.sample_rate, &body, 0.0, 0.016, 0.0, 0.020),
                 samples,
@@ -257,7 +257,7 @@ impl Plugin for PersianPlugin {
             // Finger cymbals / zills — rare metallic accent, ring sustains longer when open.
             if step.open_hat {
                 let d = (0.180_f64).min(config.step_duration * 3.5);
-                let noise = noise_burst(config.sample_rate, &config.random, d, 0.12);
+                let noise = noise_burst(config.sample_rate, config.random, d, 0.12);
                 let ring = sine(config.sample_rate, 3000.0, d, 0.08);
                 overlay_samples(
                     &envelope(config.sample_rate, &noise, 0.0, 0.020, 0.20, 0.090),
@@ -269,7 +269,7 @@ impl Plugin for PersianPlugin {
                 );
             } else {
                 let d = (0.025_f64).min(config.step_duration * 0.50);
-                let noise = noise_burst(config.sample_rate, &config.random, d, 0.10);
+                let noise = noise_burst(config.sample_rate, config.random, d, 0.10);
                 let ting = sine(config.sample_rate, 3400.0, d, 0.06);
                 overlay_samples(
                     &envelope(config.sample_rate, &noise, 0.0, 0.010, 0.0, 0.008),

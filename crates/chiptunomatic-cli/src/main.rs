@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use chiptunomatic::{constants::SAMPLE_RATE, Chiptunomatic, MixGenerator, StemOutput};
+use chiptunomatic::{random::StdRandom, Chiptunomatic, MasterOutput, MixerConfig};
 use clap::{CommandFactory, FromArgMatches, Parser};
 
 use cli_log::*;
 
+mod config;
 mod stem_plot;
 mod synth;
 mod tui;
@@ -13,6 +14,9 @@ mod tui;
 #[derive(Parser, Debug)]
 #[command(name = "chiptunomatic", version, about)]
 struct Args {
+    /// Path to a custom config file (default: ~/.config/chiptunomatic/config.yml).
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
     /// Input file. Without --output, opens the TUI with this file selected and playing.
     #[arg(value_name = "FILE")]
     input: Option<PathBuf>,
@@ -23,50 +27,17 @@ struct Args {
     #[arg(long = "info")]
     info: bool,
     /// Master playback volume (1.0 = full, 0.0 = silent).
-    #[arg(long, default_value_t = 0.25)]
-    volume: f32,
+    #[arg(long)]
+    volume: Option<f32>,
     /// Mute the master playback.
     #[arg(long, default_value_t = false)]
     muted: bool,
     /// Music generation mode.
     #[arg(short = 'm', long = "mode")]
-    mode: String,
-    /// Per-stem volume multiplier for the voice stem (default: 1.0).
-    #[arg(long, default_value_t = 1.0)]
-    voice_volume: f32,
-    /// Mute the voice stem.
+    mode: Option<String>,
+    /// Start with autoplay enabled.
     #[arg(long, default_value_t = false)]
-    voice_muted: bool,
-    /// Solo the voice stem (silences all other stems).
-    #[arg(long, default_value_t = false)]
-    voice_solo: bool,
-    /// Per-stem volume multiplier for the square (melody) stem (default: 1.0).
-    #[arg(long, default_value_t = 1.0)]
-    square_volume: f32,
-    /// Mute the square (melody) stem.
-    #[arg(long, default_value_t = false)]
-    square_muted: bool,
-    /// Solo the square (melody) stem (silences all other stems).
-    #[arg(long, default_value_t = false)]
-    square_solo: bool,
-    /// Per-stem volume multiplier for the triangle (bass) stem (default: 1.0).
-    #[arg(long, default_value_t = 1.0)]
-    triangle_volume: f32,
-    /// Mute the triangle (bass) stem.
-    #[arg(long, default_value_t = false)]
-    triangle_muted: bool,
-    /// Solo the triangle (bass) stem (silences all other stems).
-    #[arg(long, default_value_t = false)]
-    triangle_solo: bool,
-    /// Per-stem volume multiplier for the noise (drum) stem (default: 1.0).
-    #[arg(long, default_value_t = 1.0)]
-    noise_volume: f32,
-    /// Mute the noise (drum) stem.
-    #[arg(long, default_value_t = false)]
-    noise_muted: bool,
-    /// Solo the noise (drum) stem (silences all other stems).
-    #[arg(long, default_value_t = false)]
-    noise_solo: bool,
+    autoplay: bool,
 }
 
 mod audio {
@@ -108,15 +79,51 @@ mod audio {
 fn main() -> anyhow::Result<()> {
     init_cli_log!();
 
-    let mut instance = Chiptunomatic::new().with_default_plugins();
+    // Pre-scan for --config before the full clap parse so the config is available
+    // when building dynamic clap defaults (mode list, default mode).
+    let config_path: Option<std::path::PathBuf> = {
+        let argv: Vec<String> = std::env::args().collect();
+        argv.iter().enumerate().find_map(|(i, arg)| {
+            if arg == "--config" {
+                argv.get(i + 1).map(std::path::PathBuf::from)
+            } else {
+                arg.strip_prefix("--config=").map(std::path::PathBuf::from)
+            }
+        })
+    };
 
-    // Update the default values
+    let config = match &config_path {
+        Some(path) => config::Config::load_from(path)?,
+        None => {
+            config::Config::create_default_if_missing();
+            config::Config::load()
+        }
+    };
+
+    let mut instance = match &config.modes {
+        Some(modes) if modes.is_empty() => {
+            anyhow::bail!("config error: 'modes' must list at least one mode");
+        }
+        Some(modes) => Chiptunomatic::default()
+            .with_plugins_from_list(modes)
+            .map_err(|e| {
+                anyhow::anyhow!("config error: no valid mode found in 'modes' list ({e})")
+            })?,
+        None => Chiptunomatic::default().with_default_plugins(),
+    }
+    .with_random(Box::new(StdRandom::new()));
+
+    // Apply config mode as default before building clap defaults
+    if let Some(ref mode) = config.mode {
+        let _ = instance.set_mode(mode);
+    }
+
+    // Leak the default mode string once so clap can store a 'static reference
+    let default_mode: &'static str = Box::leak(instance.mode().to_string().into_boxed_str());
     let cmd = Args::command().mut_arg("mode", |a| {
-        a.required(false)
-            .default_value(instance.mode())
-            .value_parser(clap::builder::PossibleValuesParser::new(
-                instance.modes().clone(),
-            ))
+        a.required(false).default_value(default_mode).value_parser(
+            clap::builder::PossibleValuesParser::new(instance.modes().clone()),
+        )
     });
 
     let matches = cmd.get_matches();
@@ -124,34 +131,27 @@ fn main() -> anyhow::Result<()> {
         .map_err(|e| e.exit())
         .unwrap();
 
-    instance.set_mode(&args.mode)?;
+    // CLI arg wins over config; config wins over built-in default
+    let mode = args
+        .mode
+        .as_ref()
+        .or(config.mode.as_ref())
+        .cloned()
+        .unwrap_or_else(|| instance.mode().to_string());
+    instance.set_mode(&mode)?;
 
-    let mix_generator = MixGenerator::default()
-        .with_master_output(StemOutput {
-            volume: args.volume,
-            muted: args.muted,
-            solo: false,
-        })
-        .with_voice_output(StemOutput {
-            volume: args.voice_volume,
-            muted: args.voice_muted,
-            solo: args.voice_solo,
-        })
-        .with_square_output(StemOutput {
-            volume: args.square_volume,
-            muted: args.square_muted,
-            solo: args.square_solo,
-        })
-        .with_triangle_output(StemOutput {
-            volume: args.triangle_volume,
-            muted: args.triangle_muted,
-            solo: args.triangle_solo,
-        })
-        .with_noise_output(StemOutput {
-            volume: args.noise_volume,
-            muted: args.noise_muted,
-            solo: args.noise_solo,
-        });
+    // Configure the volumes — CLI > config > built-in default
+    instance.mixer_mut().set_config(MixerConfig {
+        master_output: MasterOutput {
+            volume: args.volume.unwrap_or(config.volume.unwrap_or(0.25)),
+            muted: args.muted || config.muted.unwrap_or(false),
+        },
+        voice_output: config.voice.into(),
+        square_output: config.square.into(),
+        triangle_output: config.triangle.into(),
+        noise_output: config.noise.into(),
+        sfx_output: config.sfx.into(),
+    });
 
     match (args.input.as_deref(), args.output.as_deref(), args.info) {
         (None, Some(_), _) => anyhow::bail!("--output requires an input file"),
@@ -162,10 +162,16 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         (Some(input), Some(output), false) => {
-            instance.file_to_wav(input, output, SAMPLE_RATE, mix_generator)?;
+            instance.file_to_wav(input, output)?;
             Ok(())
         }
-        (Some(input), None, false) => tui::run(instance, Some(input), mix_generator),
-        (None, None, false) => tui::run(instance, None, mix_generator),
+        (Some(input), None, false) => {
+            let autoplay = args.autoplay || config.autoplay.unwrap_or(false);
+            tui::run(instance, Some(input), autoplay)
+        }
+        (None, None, false) => {
+            let autoplay = args.autoplay || config.autoplay.unwrap_or(false);
+            tui::run(instance, None, autoplay)
+        }
     }
 }

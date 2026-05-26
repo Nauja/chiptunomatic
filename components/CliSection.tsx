@@ -183,15 +183,6 @@ export default async function CliSection({ releases }: Props) {
                   </td>
                 </tr>
                 <tr>
-                  <td>Max file size</td>
-                  <td>
-                    <span className="compare-limit">~5 KB</span>
-                  </td>
-                  <td>
-                    <span className="compare-check">Unlimited</span>
-                  </td>
-                </tr>
-                <tr>
                   <td>Stems visualization</td>
                   <td>
                     <span className="compare-cross">✗</span>

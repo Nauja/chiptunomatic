@@ -1,11 +1,11 @@
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
-use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-use crate::constants::SAMPLE_RATE;
+use crate::consumer::Consume;
 use crate::plugin::Plugin;
 use crate::synth::{envelope, midi_to_hz, square, triangle};
-use crate::{BassNote, MelodyNote, SongNote};
+use crate::{BassNote, MelodyNote, Note};
 
 /// Sample of an individual stem
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -14,12 +14,14 @@ pub struct StemSample {
     pub byte_index: u64,
 }
 
-/// Single sample of the square, triangle, and voice stems
+/// Single sample of the stems
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub struct SongSample {
+pub struct StemsSample {
+    pub voice: StemSample,
     pub square: StemSample,
     pub triangle: StemSample,
-    pub voice: StemSample,
+    pub noise: f32,
+    pub sfx: StemSample,
 }
 
 pub trait SampleStem {
@@ -29,7 +31,7 @@ pub trait SampleStem {
     fn sample_triangle(&self, sample_rate: u32) -> Vec<StemSample>;
 }
 
-pub trait Note {
+pub trait DescribeNote {
     fn midi(&self) -> f64;
     fn duration(&self) -> f64;
     fn byte_index(&self) -> u64;
@@ -44,7 +46,7 @@ pub struct SquareNote {
     pub byte_index: u64,
 }
 
-impl Note for SquareNote {
+impl DescribeNote for SquareNote {
     fn midi(&self) -> f64 {
         self.midi
     }
@@ -102,7 +104,7 @@ pub struct TriangleNote {
     pub byte_index: u64,
 }
 
-impl Note for TriangleNote {
+impl DescribeNote for TriangleNote {
     fn midi(&self) -> f64 {
         self.midi
     }
@@ -147,182 +149,108 @@ impl SampleStem for TriangleNote {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SongSampleGenerator {
-    plugin: Rc<dyn Plugin>,
-    sample_rate: u32,
+/// Sample the voice, square and triangle stems
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Sampler {
     melody_notes: VecDeque<MelodyNote>,
     bass_notes: VecDeque<BassNote>,
+    voice_samples: VecDeque<StemSample>,
+    sfx_samples: VecDeque<StemSample>,
     square_samples: VecDeque<StemSample>,
     triangle_samples: VecDeque<StemSample>,
-    voice_samples: VecDeque<StemSample>,
 }
 
-impl SongSampleGenerator {
-    pub fn new(plugin: Rc<dyn Plugin>) -> Self {
-        Self {
-            plugin,
-            sample_rate: SAMPLE_RATE,
-            melody_notes: Default::default(),
-            bass_notes: Default::default(),
-            square_samples: Default::default(),
-            triangle_samples: Default::default(),
-            voice_samples: Default::default(),
-        }
-    }
+impl Consume for Sampler {
+    type Item = Note;
 
-    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            ..self
-        }
-    }
-
-    // Add a single note to the buffer
-    pub fn push(&mut self, note: SongNote) {
+    fn push(&mut self, note: Note) {
         match note {
-            SongNote::Melody(n) => self.melody_notes.push_back(n),
-            SongNote::Bass(n) => self.bass_notes.push_back(n),
+            Note::Melody(n) => self.melody_notes.push_back(n),
+            Note::Bass(n) => self.bass_notes.push_back(n),
         }
     }
 
-    // Add notes to the buffer
-    pub fn extend(&mut self, notes: &[SongNote]) {
+    fn extend(&mut self, notes: &[Note]) {
         for note in notes {
             self.push(*note);
         }
     }
 
-    // Number of available samples
-    pub fn len(&self) -> usize {
-        self.square_samples.len().min(self.triangle_samples.len())
+    fn capacity(&self) -> usize {
+        self.melody_notes.capacity().min(self.bass_notes.capacity())
     }
 
-    // If there are no available samples
-    pub fn is_empty(&self) -> bool {
+    fn len(&self) -> usize {
+        self.melody_notes.len().min(self.bass_notes.len())
+    }
+
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
 
-    // Sample the notes currently in the buffer
-    pub fn sample(&mut self) -> Vec<SongSample> {
-        let mut samples = Vec::new();
-
+impl Sampler {
+    /// Return the next sample
+    pub fn sample(&mut self, plugin: &Box<dyn Plugin>, sample_rate: u32) -> Option<StemsSample> {
         loop {
             // Drain the current available samples
-            let available_samples = self.square_samples.len().min(self.triangle_samples.len());
-            for _ in 0..available_samples {
+            if self.square_samples.len() > 0 && self.triangle_samples.len() > 0 {
                 let Some(square) = self.square_samples.pop_front() else {
                     // Can't happen
-                    break;
+                    return None;
                 };
 
                 let Some(triangle) = self.triangle_samples.pop_front() else {
                     // Can't happen
-                    break;
+                    return None;
                 };
 
                 let voice = self.voice_samples.pop_front().unwrap_or_default();
-                samples.push(SongSample { square, triangle, voice });
+                let sfx = self.sfx_samples.pop_front().unwrap_or_default();
+                return Some(StemsSample {
+                    voice,
+                    square,
+                    triangle,
+                    noise: 0.0,
+                    sfx,
+                });
             }
 
             // Sample melody notes if there are too much bass samples
             while self.triangle_samples.len() > self.square_samples.len() {
                 let Some(note) = self.melody_notes.pop_front() else {
                     // Not enough melody notes to continue
-                    return samples;
+                    return None;
                 };
 
                 self.square_samples
-                    .extend(self.plugin.sample_melody_note(note, self.sample_rate));
+                    .extend(plugin.sample_melody_note(note, sample_rate));
                 self.voice_samples
-                    .extend(self.plugin.sample_voice_note(note, self.sample_rate));
+                    .extend(plugin.sample_voice_note(note, sample_rate));
+                self.sfx_samples
+                    .extend(plugin.sample_sfx_note(note, sample_rate));
             }
 
             // Sample the next bass note if any
             if let Some(note) = self.bass_notes.pop_front() {
                 self.triangle_samples
-                    .extend(self.plugin.sample_bass_note(note, self.sample_rate));
+                    .extend(plugin.sample_bass_note(note, sample_rate));
             }
 
             // Stop here if we can't generate enough bass samples
             if self.triangle_samples.is_empty() {
-                return samples;
+                return None;
             }
         }
+    }
+
+    /// Sample the notes currently in the buffer
+    pub fn samples(&mut self, plugin: &Box<dyn Plugin>, sample_rate: u32) -> Vec<StemsSample> {
+        let mut samples = Vec::new();
+        while let Some(sample) = self.sample(plugin, sample_rate) {
+            samples.push(sample);
+        }
+
+        samples
     }
 }
-
-#[cfg(feature = "std")]
-mod iter {
-    use alloc::rc::Rc;
-    use std::collections::VecDeque;
-
-    use crate::{
-        plugin::Plugin, DrumSample, MixSamples, SongNote, SongSample, SongSampleGenerator,
-    };
-
-    /// Iterator that samples the song notes
-    pub struct SampleSongNotes<I: IntoIterator<Item = std::io::Result<SongNote>>> {
-        inner: I::IntoIter,
-        sample_generator: SongSampleGenerator,
-        samples: VecDeque<SongSample>,
-    }
-
-    impl<I: IntoIterator<Item = std::io::Result<SongNote>>> SampleSongNotes<I> {
-        pub fn new(inner: I, plugin: Rc<dyn Plugin>) -> Self {
-            Self::from_generator(inner, SongSampleGenerator::new(plugin))
-        }
-
-        pub fn from_generator(inner: I, sample_generator: SongSampleGenerator) -> Self {
-            Self {
-                inner: inner.into_iter(),
-                sample_generator,
-                samples: Default::default(),
-            }
-        }
-
-        pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-            Self {
-                sample_generator: self.sample_generator.with_sample_rate(sample_rate),
-                ..self
-            }
-        }
-
-        // Mix the song samples with drum samples
-        pub fn mix<D: IntoIterator<Item = DrumSample>>(
-            self,
-            drum_samples: D,
-        ) -> MixSamples<Self, D> {
-            MixSamples::new(self, drum_samples)
-        }
-    }
-
-    impl<I: IntoIterator<Item = std::io::Result<SongNote>>> Iterator for SampleSongNotes<I> {
-        type Item = std::io::Result<SongSample>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                // Drain the generated samples first
-                if let Some(sample) = self.samples.pop_front() {
-                    return Some(Ok(sample));
-                }
-
-                // Try to generate samples for the next note
-                match self.inner.next() {
-                    // Not enough notes to generate samples
-                    None => return None,
-                    Some(Err(e)) => return Some(Err(e)),
-                    Some(Ok(n)) => {
-                        // Push the note to the generator
-                        self.sample_generator.push(n);
-                        // Generate samples
-                        self.samples.extend(self.sample_generator.sample());
-                    }
-                };
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-pub use iter::*;

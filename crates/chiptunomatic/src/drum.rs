@@ -1,10 +1,12 @@
 use alloc::collections::VecDeque;
-use alloc::rc::Rc;
+
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::{
-    constants::{HAT_PATTERNS, KICK_PATTERNS, SAMPLE_RATE, SNARE_PATTERNS},
-    plugin::{Plugin, Random, SampleStepConfig},
+    constants::{HAT_PATTERNS, KICK_PATTERNS, SNARE_PATTERNS},
+    plugin::{Plugin, SampleStepConfig},
+    random::Random,
     SongMetadata,
 };
 
@@ -17,7 +19,7 @@ pub struct DrumStep {
     pub offset: usize,
 }
 
-/// 16-step drum grid and seed bytes
+/// 16-step drum pattern
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrumPattern {
     pub steps: [DrumStep; 16],
@@ -65,6 +67,7 @@ impl DrumPattern {
 }
 
 /// Yield the steps of a drum pattern infinitely
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Steps {
     pattern: DrumPattern,
     step: u64,
@@ -86,62 +89,68 @@ impl Iterator for Steps {
     }
 }
 
-pub type DrumSample = f32;
-
-/// Generate drum samples from the steps
-pub struct DrumSampleGenerator {
-    metadata: SongMetadata,
-    plugin: Rc<dyn Plugin>,
-    sample_rate: f64,
-    random: Rc<dyn Random>,
+/// Generate infinite samples from a drum pattern
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrumSampler {
+    steps: Steps,
 }
 
-impl DrumSampleGenerator {
-    pub fn new(metadata: SongMetadata, plugin: Rc<dyn Plugin>, random: Rc<dyn Random>) -> Self {
-        Self {
-            metadata,
-            plugin,
-            sample_rate: SAMPLE_RATE as f64,
-            random,
-        }
+impl DrumSampler {
+    /// Get the drum pattern
+    pub fn drum_pattern(&self) -> &DrumPattern {
+        &self.steps.pattern
     }
 
-    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-        Self {
-            sample_rate: sample_rate as f64,
-            ..self
-        }
+    /// Set the drum pattern
+    pub fn set_drum_pattern(&mut self, pattern: DrumPattern) {
+        self.steps.pattern = pattern;
     }
 
-    // Iterate the samples infinitely
-    pub fn samples(self) -> SampleDrumSteps {
-        SampleDrumSteps {
-            drum_pattern: self.metadata.drum_pattern.clone(),
-            sample_generator: self,
-            step: 0,
-            samples: Default::default(),
-        }
+    /// Get the current drum step
+    pub fn drum_step(&self) -> u64 {
+        self.steps.step
     }
 
-    /// Sample a step
-    pub fn sample_step(&mut self, step: DrumStep) -> Vec<DrumSample> {
+    /// Set the current drum step
+    pub fn set_drum_step(&mut self, step: u64) {
+        self.steps.step = step;
+    }
+
+    /// Reset to the first drum step
+    pub fn reset(&mut self) {
+        self.steps.step = 0;
+    }
+
+    /// Sample the current drum step
+    pub fn sample(
+        &mut self,
+        metadata: &SongMetadata,
+        plugin: &Box<dyn Plugin>,
+        sample_rate: u32,
+        random: &mut Box<dyn Random>,
+    ) -> Vec<f32> {
+        let Some(step) = self.steps.next() else {
+            return Default::default();
+        };
+
+        let sample_rate = sample_rate as f64;
         let pattern = (step.offset % 16) as usize;
-        let step_duration = self.metadata.timing.sixteenth;
-        let color = self.metadata.seed[pattern % 8];
+        let step_duration = metadata.timing.sixteenth;
+        let color = metadata.seed[pattern % 8];
 
         // Create enough empty samples in case there is no drum at this step
-        let total_samples = (self.sample_rate * self.metadata.timing.sixteenth).floor() as usize;
+        let total_samples = (sample_rate * metadata.timing.sixteenth).floor() as usize;
         let mut samples = Vec::with_capacity(total_samples);
         samples.resize_with(total_samples, Default::default);
 
-        self.plugin.sample_step(
-            step,
+        plugin.sample_step(
+            &step,
             SampleStepConfig {
-                sample_rate: self.sample_rate,
+                sample_rate,
                 step_duration,
                 pattern,
                 color,
-                random: &self.random,
+                random,
             },
             &mut samples,
         );
@@ -150,57 +159,39 @@ impl DrumSampleGenerator {
     }
 }
 
-/// Iterator the sample the drum steps
-pub struct SampleDrumSteps {
-    sample_generator: DrumSampleGenerator,
-    drum_pattern: DrumPattern,
-    // Current drum step
-    step: u64,
-    // Samples of current drum step
-    samples: VecDeque<DrumSample>,
+/// Allow to iterate the drum samples one by one
+
+#[derive(Default, Debug, Clone)]
+pub struct SampleDrum {
+    inner: DrumSampler,
+    samples: VecDeque<f32>,
 }
 
-impl SampleDrumSteps {
-    pub fn new(metadata: SongMetadata, plugin: Rc<dyn Plugin>, random: Rc<dyn Random>) -> Self {
-        Self::from_generator(
-            metadata.clone(),
-            DrumSampleGenerator::new(metadata, plugin, random),
-        )
+impl SampleDrum {
+    pub fn set_drum_pattern(&mut self, pattern: DrumPattern) {
+        self.inner.set_drum_pattern(pattern);
     }
 
-    pub fn from_generator(metadata: SongMetadata, sample_generator: DrumSampleGenerator) -> Self {
-        Self {
-            drum_pattern: metadata.drum_pattern.clone(),
-            sample_generator,
-            step: 0,
-            samples: Default::default(),
-        }
+    pub fn with_drum_pattern(mut self, pattern: DrumPattern) -> Self {
+        self.inner.set_drum_pattern(pattern);
+        self
     }
 
-    pub fn with_sample_rate(self, sample_rate: u32) -> Self {
-        Self {
-            sample_generator: self.sample_generator.with_sample_rate(sample_rate),
-            ..self
-        }
-    }
-}
-
-impl Iterator for SampleDrumSteps {
-    type Item = DrumSample;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn next(
+        &mut self,
+        metadata: &SongMetadata,
+        plugin: &Box<dyn Plugin>,
+        sample_rate: u32,
+        random: &mut Box<dyn Random>,
+    ) -> f32 {
         loop {
-            // Drain the already generated samples
+            // Drain the available samples first
             if let Some(sample) = self.samples.pop_front() {
-                return Some(sample);
+                return sample;
             }
 
-            // Generate the samples for the next step
-            self.samples.extend(
-                self.sample_generator
-                    .sample_step(self.drum_pattern.step(self.step)),
-            );
-            self.step += 1;
+            self.samples
+                .extend(self.inner.sample(metadata, plugin, sample_rate, random));
         }
     }
 }

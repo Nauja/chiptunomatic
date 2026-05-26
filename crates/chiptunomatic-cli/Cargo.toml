@@ -1,8 +1,9 @@
 [package]
 name = "chiptunomatic-cli"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "AGPL-3.0"
+homepage = "https://github.com/Nauja/chiptunomatic"
 repository = "https://github.com/Nauja/chiptunomatic"
 
 [[bin]]
@@ -25,3 +26,6 @@ ratatui = { version = "0.30", features = [
 ratatui-explorer = "0.3"
 rodio = "0.19"
 rand = "0.8"
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

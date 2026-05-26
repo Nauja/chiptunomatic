@@ -3,7 +3,7 @@ use crate::synth::{fm_sine, midi_to_hz, pitch_sweep_sine, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -80,9 +80,11 @@ impl Plugin for SambaPlugin {
         // Bright, articulated melody: FM 2:1, β=0.6 — crisp and reedy, sits clearly
         // above the drums without going metallic. Punchy envelope: fast attack,
         // short decay to a modest sustain so notes articulate crisply.
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.38, 2.0, 0.6);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.38, 2.0, 0.6);
         let mel = envelope(sr, &mel, 0.002, 0.15, 0.25, 0.06);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.16, 2.0, 0.6);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.16, 2.0, 0.6);
         let harm = envelope(sr, &harm, 0.002, 0.15, 0.25, 0.06);
         (0..total)
             .map(|i| StemSample {
@@ -130,7 +132,7 @@ impl Plugin for SambaPlugin {
         DrumPattern { steps }
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Surdo: pitch sweep from ~1.5× the target frequency down to the fundamental
             // gives the boom-and-settle impact of a large bass drum head.  The longer
@@ -150,7 +152,7 @@ impl Plugin for SambaPlugin {
             let accent = config.pattern % 2 == 0;
             let amp: f32 = if accent { 0.32 } else { 0.18 };
             let dur_n = (0.06_f64).min(config.step_duration);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let noise = noise_burst(config.sample_rate, config.random, dur_n, amp);
             let tone = sine(config.sample_rate, 250.0, dur_n, amp * 0.25);
             let mixed: Vec<f32> = noise
                 .iter()
@@ -168,7 +170,7 @@ impl Plugin for SambaPlugin {
             // provide the samba groove; the synthesis just needs to be short and bright.
             let amp: f32 = if config.pattern % 2 == 0 { 0.15 } else { 0.10 };
             let d = (0.015_f64).min(config.step_duration * 0.35);
-            let noise = noise_burst(config.sample_rate, &config.random, d, amp);
+            let noise = noise_burst(config.sample_rate, config.random, d, amp);
             let tok_hz = 1400.0 + f64::from(config.color % 10) * 30.0;
             let tok = sine(config.sample_rate, tok_hz, d, amp * 0.50);
             let mixed: Vec<f32> = noise.iter().zip(tok.iter()).map(|(&n, &t)| n + t).collect();

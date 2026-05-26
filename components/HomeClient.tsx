@@ -280,9 +280,6 @@ export default function HomeClient() {
                         <span className="drop-sub d-block">
                           or click to browse
                         </span>
-                        <span className="drop-warn d-block">
-                          files bigger than 5 KB may fail to generate
-                        </span>
                       </div>
                     )}
                   </div>

@@ -1,10 +1,10 @@
 //! Waveforms, envelope, and MIDI → Hz
 
-use alloc::rc::Rc;
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::plugin::Random;
+use crate::random::Random;
 
 pub fn midi_to_hz(midi_note: f64) -> f64 {
     440.0 * 2_f64.powf((midi_note - 69.0) / 12.0)
@@ -56,7 +56,12 @@ pub fn triangle(sample_rate: f64, freq: f64, duration: f64, amp: f32) -> Vec<f32
         .collect()
 }
 
-pub fn noise_burst(sample_rate: f64, random: &Rc<dyn Random>, duration: f64, amp: f32) -> Vec<f32> {
+pub fn noise_burst(
+    sample_rate: f64,
+    random: &mut Box<dyn Random>,
+    duration: f64,
+    amp: f32,
+) -> Vec<f32> {
     let n = (sample_rate * duration).floor() as usize;
     (0..n)
         .map(|_| amp * (random.next_float() * 2.0 - 1.0))

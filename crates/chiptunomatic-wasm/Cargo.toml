@@ -4,12 +4,15 @@ version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
 repository = "https://github.com/Nauja/chiptunomatic"
+homepage = "https://github.com/Nauja/chiptunomatic"
 description = "WebAssembly bindings for chiptunomatic (incremental synthesis for JS)"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-chiptunomatic = { path = "../chiptunomatic", default-features = false, features = ["js", "std"] }
+chiptunomatic = { path = "../chiptunomatic", default-features = false, features = [
+    "js",
+    "std",
+] }
 wasm-bindgen = "0.2.120"
-rand = { version = "0.8", default-features = false, features = ["std_rng"] }

@@ -4,7 +4,7 @@ use crate::synth::{fm_sine, midi_to_hz, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumSample, DrumStep,
+    DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -61,12 +61,13 @@ impl Plugin for ToyPlugin {
         // Kalimba tine: FM with a 3:1 modulator ratio and β=1.2 produces the slight
         // inharmonicity of struck metal — bright without being a bell. Fast 1ms attack,
         // 220ms decay to a 8% sustain so the note has a clear "tink" then fades.
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.55, 3.0, 1.2);
+        let midi = (note.midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.55, 3.0, 1.2);
         let mel = envelope(sr, &mel, 0.001, 0.22, 0.08, 0.10);
         // Octave shimmer: same FM formula one octave up, much shorter decay so it
         // disappears in the first ~100ms and leaves the fundamental to ring alone —
         // exactly how a real kalimba tine behaves.
-        let shimmer = fm_sine(sr, midi_to_hz(note.midi + 12.0), dur, 0.28, 3.0, 1.2);
+        let shimmer = fm_sine(sr, midi_to_hz(midi + 12.0), dur, 0.28, 3.0, 1.2);
         let shimmer = envelope(sr, &shimmer, 0.001, 0.10, 0.02, 0.06);
         (0..total)
             .map(|i| StemSample {
@@ -95,7 +96,7 @@ impl Plugin for ToyPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Light toy thump: soft pitched sine, gentle and airy
             let freq = 100.0 + f64::from(config.color % 20);
@@ -111,7 +112,7 @@ impl Plugin for ToyPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.10 } else { 0.05 };
             let dur_n = (0.05_f64).min(config.step_duration);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let noise = noise_burst(config.sample_rate, config.random, dur_n, amp);
             let tone = sine(config.sample_rate, 150.0, dur_n, amp * 0.35);
             let mixed: alloc::vec::Vec<f32> = noise
                 .iter()
@@ -128,12 +129,12 @@ impl Plugin for ToyPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.04_f64).min(config.step_duration);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.05);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.05);
                     envelope(config.sample_rate, &s, 0.001, 0.02, 0.10, 0.02)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.04 } else { 0.02 };
                     let d = (0.010_f64).min(config.step_duration * 0.25);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );

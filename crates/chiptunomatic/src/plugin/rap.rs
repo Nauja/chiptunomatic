@@ -3,7 +3,7 @@ use crate::synth::{fm_sine, midi_to_hz, sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst, square},
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -97,9 +97,11 @@ impl Plugin for RapPlugin {
         }
         let dur = total as f64 / sr;
         // Warm FM piano/Rhodes — mod ratio 1.5, index 1.0 for mid-range presence
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.28, 1.5, 1.0);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.28, 1.5, 1.0);
         let mel = envelope(sr, &mel, 0.004, 0.18, 0.45, 0.08);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.12, 1.5, 1.0);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.12, 1.5, 1.0);
         let harm = envelope(sr, &harm, 0.004, 0.18, 0.45, 0.08);
         (0..total)
             .map(|i| StemSample {
@@ -127,7 +129,7 @@ impl Plugin for RapPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // Boom: square thud at ~78 Hz + sine sub, tight decay
             let freq = 72.0 + f64::from(config.color % 15);
@@ -148,7 +150,7 @@ impl Plugin for RapPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.30 } else { 0.12 };
             let dur_n = (0.08_f64).min(config.step_duration);
-            let noise = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let noise = noise_burst(config.sample_rate, config.random, dur_n, amp);
             let tone = sine(config.sample_rate, 220.0, dur_n, amp * 0.50);
             let mixed: alloc::vec::Vec<f32> = noise
                 .iter()
@@ -165,12 +167,12 @@ impl Plugin for RapPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.08_f64).min(config.step_duration * 2.0);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.14);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.14);
                     envelope(config.sample_rate, &s, 0.001, 0.05, 0.18, 0.03)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.12 } else { 0.07 };
                     let d = (0.018_f64).min(config.step_duration * 0.42);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );

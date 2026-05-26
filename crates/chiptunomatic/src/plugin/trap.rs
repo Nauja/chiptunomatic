@@ -3,7 +3,7 @@ use crate::synth::{fm_sine, midi_to_hz, pitch_sweep_sine};
 use crate::{
     plugin::{overlay_samples, SampleStepConfig},
     synth::{envelope, noise_burst},
-    DrumPattern, DrumSample, DrumStep,
+    DrumPattern, DrumStep,
 };
 use crate::{BassNote, MelodyNote, StemSample};
 
@@ -87,9 +87,11 @@ impl Plugin for TrapPlugin {
         }
         let dur = total as f64 / sr;
         // Bell/pluck: FM with high mod ratio and index for metallic shimmer
-        let mel = fm_sine(sr, midi_to_hz(note.midi), dur, 0.25, 4.0, 2.5);
+        let midi = (note.midi - 12.0).max(21.0);
+        let harmony_midi = (note.harmony_midi - 12.0).max(21.0);
+        let mel = fm_sine(sr, midi_to_hz(midi), dur, 0.25, 4.0, 2.5);
         let mel = envelope(sr, &mel, 0.002, 0.15, 0.10, 0.05);
-        let harm = fm_sine(sr, midi_to_hz(note.harmony_midi), dur, 0.10, 4.0, 2.5);
+        let harm = fm_sine(sr, midi_to_hz(harmony_midi), dur, 0.10, 4.0, 2.5);
         let harm = envelope(sr, &harm, 0.002, 0.15, 0.10, 0.05);
         (0..total)
             .map(|i| StemSample {
@@ -119,7 +121,7 @@ impl Plugin for TrapPlugin {
             .collect()
     }
 
-    fn sample_step(&self, step: DrumStep, config: SampleStepConfig, samples: &mut Vec<DrumSample>) {
+    fn sample_step(&self, step: &DrumStep, config: SampleStepConfig, samples: &mut Vec<f32>) {
         if step.kick {
             // 808 kick: dramatic pitch sweep across the full step window
             let raw = pitch_sweep_sine(
@@ -147,13 +149,13 @@ impl Plugin for TrapPlugin {
             let accent = config.pattern == 4 || config.pattern == 12;
             let amp = if accent { 0.40 } else { 0.18 };
             let dur_n = (0.07_f64).min(config.step_duration);
-            let raw = noise_burst(config.sample_rate, &config.random, dur_n, amp);
+            let raw = noise_burst(config.sample_rate, config.random, dur_n, amp);
             overlay_samples(
                 &envelope(config.sample_rate, &raw, 0.0, 0.030, 0.0, 0.020),
                 samples,
             );
             if accent {
-                let raw2 = noise_burst(config.sample_rate, &config.random, dur_n * 0.6, amp * 0.7);
+                let raw2 = noise_burst(config.sample_rate, config.random, dur_n * 0.6, amp * 0.7);
                 let env2 = envelope(config.sample_rate, &raw2, 0.0, 0.025, 0.0, 0.015);
                 let offset = (config.sample_rate * 0.008) as usize;
                 for i in 0..env2.len() {
@@ -169,12 +171,12 @@ impl Plugin for TrapPlugin {
             overlay_samples(
                 &if step.open_hat {
                     let d = (0.10_f64).min(config.step_duration * 2.5);
-                    let s = noise_burst(config.sample_rate, &config.random, d, 0.20);
+                    let s = noise_burst(config.sample_rate, config.random, d, 0.20);
                     envelope(config.sample_rate, &s, 0.0, 0.04, 0.25, 0.05)
                 } else {
                     let amp = if config.pattern % 2 == 0 { 0.16 } else { 0.10 };
                     let d = (0.020_f64).min(config.step_duration * 0.45);
-                    noise_burst(config.sample_rate, &config.random, d, amp)
+                    noise_burst(config.sample_rate, config.random, d, amp)
                 },
                 samples,
             );

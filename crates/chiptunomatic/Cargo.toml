@@ -1,8 +1,11 @@
 [package]
 name = "chiptunomatic"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "AGPL-3.0"
+categories = ["no-std"]
+documentation = "https://docs.rs/chiptunomatic"
+homepage = "https://github.com/Nauja/chiptunomatic"
 repository = "https://github.com/Nauja/chiptunomatic"
 description = "Deterministic chiptune generator from binary input (WASM-compatible library)"
 
@@ -10,12 +13,11 @@ description = "Deterministic chiptune generator from binary input (WASM-compatib
 crate-type = ["rlib"]
 
 [features]
-default = ["std", "wav", "arpeggio"]
+default = ["std", "wav"]
 std = ["rand/std", "rand/std_rng"]
 # Enables getrandom's `js` backend (needed on wasm32-unknown-unknown in JS hosts). See https://docs.rs/getrandom#webassembly-support
 js = ["dep:getrandom", "getrandom/js"]
 wav = ["dep:hound", "std"]
-arpeggio = []
 
 [dependencies]
 sha2 = "0.10"
@@ -26,6 +28,7 @@ md5 = "0.8.0"
 hound = { version = "3", optional = true }
 thiserror = "2.0.18"
 dyn-clone = "1.0.20"
+getset = "0.1.6"
 
 [dev-dependencies]
 anyhow = "1.0.102"

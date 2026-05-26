@@ -1,17 +1,13 @@
 use core::fmt::Debug;
 
-use alloc::rc::Rc;
+use alloc::boxed::Box;
 pub use alloc::string::String;
 pub use alloc::vec::Vec;
 use dyn_clone::DynClone;
 
+use crate::random::Random;
 use crate::synth::{envelope, midi_to_hz, vibrato_sine};
-#[cfg(feature = "arpeggio")]
-use crate::ArpeggioConfig;
-use crate::{
-    constants::PENTATONIC_MINOR, BassNote, DrumPattern, DrumSample, DrumStep, MelodyNote,
-    StemSample,
-};
+use crate::{constants::PENTATONIC_MINOR, BassNote, DrumPattern, DrumStep, MelodyNote, StemSample};
 
 pub mod chiptune;
 pub mod koto;
@@ -25,21 +21,53 @@ pub mod samba;
 pub mod toy;
 pub mod trap;
 
-/// Hide the generic Rng object
-pub trait Random: Debug {
-    fn next_float(&self) -> f32;
-}
-
 #[derive(Debug)]
 pub struct SampleStepConfig<'a> {
     pub sample_rate: f64,
     pub step_duration: f64,
     pub pattern: usize,
     pub color: u8,
-    pub random: &'a Rc<dyn Random>,
+    pub random: &'a mut Box<dyn Random>,
 }
 
-pub trait Plugin: Debug + DynClone {
+/// Controls which stems are audible in a song section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StemMask {
+    pub voice: bool,
+    pub square: bool,
+    pub triangle: bool,
+    pub noise: bool,
+    pub sfx: bool,
+}
+
+impl StemMask {
+    pub const ALL: Self = Self {
+        voice: true,
+        square: true,
+        triangle: true,
+        noise: true,
+        sfx: true,
+    };
+}
+
+impl Default for StemMask {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+/// One entry in a plugin's repeating song-structure table.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct SectionDef {
+    /// Length of this section in beats.
+    pub beats: u64,
+    /// Which stems are audible during this section.
+    pub stems: StemMask,
+    /// Seconds of silence inserted after this section ends.
+    pub silence_after: f64,
+}
+
+pub trait Plugin: Debug + DynClone + Send {
     /// Return the mode name
     fn mode(&self) -> &'static str;
     fn mode_string(&self) -> String;
@@ -57,6 +85,18 @@ pub trait Plugin: Debug + DynClone {
     fn sample_melody_note(&self, note: MelodyNote, sample_rate: u32) -> Vec<StemSample>;
     /// Sample the triangle wave of a bass note
     fn sample_bass_note(&self, note: BassNote, sample_rate: u32) -> Vec<StemSample>;
+
+    /// Whether this plugin produces SFX on the sfx stem.
+    /// Defaults to false; override to true in plugins that implement `sample_sfx_note`.
+    fn has_sfx(&self) -> bool {
+        false
+    }
+
+    /// Sample an SFX note for a dedicated effects stem.
+    /// The default returns silence; plugins override for style-specific SFX.
+    fn sample_sfx_note(&self, _note: MelodyNote, _sample_rate: u32) -> Vec<StemSample> {
+        Vec::new()
+    }
 
     /// Sample a voice note (humming/singing) following the melody.
     /// The default produces a gentle vibrato sine that blends across all modes;
@@ -82,9 +122,9 @@ pub trait Plugin: Debug + DynClone {
     /// Sample a drum step
     fn sample_step<'a>(
         &self,
-        step: DrumStep,
+        step: &DrumStep,
         config: SampleStepConfig<'a>,
-        samples: &mut Vec<DrumSample>,
+        samples: &mut Vec<f32>,
     );
 
     /// Build a 16-step drum pattern from an 8-byte seed.
@@ -93,18 +133,22 @@ pub trait Plugin: Debug + DynClone {
         DrumPattern::from_seed(seed)
     }
 
-    #[cfg(feature = "arpeggio")]
-    /// Return an arpeggio configuration for this plugin, or `None` to play
-    /// notes as-is.  Wrap a [`SongNoteReader`] with [`ArpeggioNoteReader`]
-    /// to apply it.
-    fn arpeggio(&self) -> Option<ArpeggioConfig> {
-        None
+    /// Return the repeating section table for this plugin.
+    /// An empty slice (the default) disables structured sections.
+    fn section_defs(&self) -> &'static [SectionDef] {
+        &[]
+    }
+
+    /// Generate the section table from the song seed.
+    /// Override for seed-driven variation; default converts the static `section_defs()` slice.
+    fn section_defs_from_seed(&self, _seed: u32) -> Vec<SectionDef> {
+        self.section_defs().to_vec()
     }
 }
 
 dyn_clone::clone_trait_object!(Plugin);
 
-pub(crate) fn overlay_samples(src: &Vec<DrumSample>, dst: &mut Vec<DrumSample>) {
+pub(crate) fn overlay_samples(src: &Vec<f32>, dst: &mut Vec<f32>) {
     for i in 0..dst.len().min(src.len()) {
         dst[i] += src[i];
     }
