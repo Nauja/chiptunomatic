@@ -1,7 +1,7 @@
 # chiptunomatic
 
 
-<p align="center"><img src="https://raw.githubusercontent.com/Nauja/chiptunomatic/media/preview-v0.2.0.gif"/></p>
+<p align="center"><img src="https://raw.githubusercontent.com/Nauja/chiptunomatic/media/preview-v0.3.0.gif"/></p>
 
 Turn any file into a chiptune. Drop in a binary, an executable, a document — anything. The file name and its byte length are hashed into a deterministic seed, which drives every musical decision: root note, tempo, chord progression, drum pattern, and waveforms. The same file always produces the same tune.
 
