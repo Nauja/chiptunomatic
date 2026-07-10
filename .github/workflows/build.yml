@@ -76,6 +76,31 @@ jobs:
           name: cli-windows
           path: dist/chiptunomatic-x86_64-pc-windows-msvc.exe
 
+  build-cli-macos:
+    name: CLI (macOS Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CLI (release)
+        run: cargo build --release -p chiptunomatic-cli
+
+      - name: Test
+        run: ./target/release/chiptunomatic --help
+
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          cp target/release/chiptunomatic dist/chiptunomatic-aarch64-apple-darwin
+
+      - uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          name: cli-macos
+          path: dist/chiptunomatic-aarch64-apple-darwin
+
   build-chiptunomatic-wasm:
     name: chiptunomatic-wasm (wasm-bindgen, web)
     runs-on: ubuntu-latest

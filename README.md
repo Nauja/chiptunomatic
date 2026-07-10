@@ -45,6 +45,7 @@ Pre-built binaries are attached to every [GitHub release](https://github.com/Nau
 | Platform | File |
 |---|---|
 | Linux x86-64 | `chiptunomatic-x86_64-unknown-linux-gnu` |
+| macOS Apple Silicon | `chiptunomatic-aarch64-apple-darwin` |
 | Windows x86-64 | `chiptunomatic-x86_64-pc-windows-msvc.exe` |
 
 ### Build from source
@@ -53,6 +54,13 @@ Pre-built binaries are attached to every [GitHub release](https://github.com/Nau
 
 ```sh
 sudo apt-get install libasound2-dev pkg-config
+cargo build --release -p chiptunomatic-cli
+# binary at target/release/chiptunomatic
+```
+
+**macOS** (Apple Silicon and Intel — no extra dependencies; uses Core Audio):
+
+```sh
 cargo build --release -p chiptunomatic-cli
 # binary at target/release/chiptunomatic
 ```
