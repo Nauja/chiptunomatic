@@ -1,5 +1,7 @@
 # chiptunomatic
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![GitHub Pages](https://img.shields.io/badge/deployed-GitHub%20Pages-blue?logo=github)](https://nauja.github.io/chiptunomatic)
 
 <p align="center"><img src="https://raw.githubusercontent.com/Nauja/chiptunomatic/media/preview-v0.3.0.gif"/></p>
 
@@ -423,3 +425,11 @@ Samba mode captures the energy and drive of Brazilian samba — fast, bright, an
 - *Caixa (snare)* — the driving force of samba, played dense and relentlessly. Three patterns: all 16th notes (the most characteristic caixa texture), all 8th notes, and a repinique-style syncopation. Accents fall on 8th-note positions (even steps) regardless of which pattern is active; 16th-note offbeats are played at roughly half amplitude. Synthesis is a very fast noise burst (30 ms zero-to-silence decay) blended with a 250 Hz body tone for crack.
 
 - *Tamborim (hi-hat)* — plays one of three classic samba syncopated figures rather than a simple subdivision: the dense teleco-teco (1 . 1 . 1 1 . 1 . 1 . 1 1 . 1 .), the sparse teleco-teco (1 . . 1 . 1 . . 1 . . 1 . 1 . .), or the cruzado 3+3+2 pattern (1 . . 1 . . 1 . 1 . . 1 . . 1 .). Synthesis adds a brief 1 400–1 700 Hz sine "tok" tone on top of the noise burst, giving the instrument the wood-frame-and-metal-head timbre of a real tamborim rather than plain noise.
+
+## Feedback & Support
+
+Feedback, bug reports, and feature ideas are very welcome — feel free to [open an issue](https://github.com/Nauja/chiptunomatic/issues) on GitHub.
+
+If you find the app useful and want to support its development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P8H4213C8K)
