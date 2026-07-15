@@ -259,7 +259,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chiptunomatic"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "dyn-clone",
@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "chiptunomatic-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "chiptunomatic",
