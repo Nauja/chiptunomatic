@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
-import { GoogleAnalytics } from '@/components/GoogleAnalytics';
+import {
+  GoogleTagManagerBody,
+  GoogleTagManagerHead,
+} from '@/components/GoogleTagManager';
 import { SiteFooter } from '@/components/SiteFooter';
 import 'bootstrap/dist/css/bootstrap-grid.min.css';
 import 'bootstrap/dist/css/bootstrap-utilities.min.css';
@@ -14,8 +17,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <GoogleTagManagerHead />
+      </head>
       <body>
-        <GoogleAnalytics />
+        <GoogleTagManagerBody />
         <div className="site-shell d-flex flex-column min-vh-100">
           <div className="site-content flex-fill d-flex flex-column">{children}</div>
           <SiteFooter />

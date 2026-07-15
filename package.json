@@ -16,7 +16,6 @@
     "react": "^18.3.1",
     "react-bootstrap": "^2.10.10",
     "react-dom": "^18.3.1",
-    "react-ga": "^3.3.1",
     "remark": "^15.0.1",
     "remark-html": "^16.0.1"
   },
