@@ -50,6 +50,7 @@ export default async function CliSection({ releases }: Props) {
 
   const gifUrl = process.env.NEXT_PUBLIC_CLI_GIF_URL;
   const dlLinux = process.env.NEXT_PUBLIC_DOWNLOAD_LINUX_URL;
+  const dlMac = process.env.NEXT_PUBLIC_DOWNLOAD_MAC_URL;
   const dlWindows = process.env.NEXT_PUBLIC_DOWNLOAD_WINDOWS_URL;
   const repoUrl = process.env.NEXT_PUBLIC_GITHUB_REPO_URL?.trim();
 
@@ -226,12 +227,19 @@ export default async function CliSection({ releases }: Props) {
         <Row className="gx-0 mb-3">
           <Col xs={12}>
             <p className="cli-features-label">DOWNLOAD</p>
-            {(dlLinux || dlWindows) && (
+            {(dlLinux || dlMac || dlWindows) && (
               <Row className="g-2">
                 {dlLinux && (
                   <Col>
                     <a className="btn-dl" href={dlLinux}>
                       ↓ DOWNLOAD LINUX
+                    </a>
+                  </Col>
+                )}
+                {dlMac && (
+                  <Col>
+                    <a className="btn-dl" href={dlMac}>
+                      ↓ DOWNLOAD MACOS
                     </a>
                   </Col>
                 )}
