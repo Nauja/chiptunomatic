@@ -1,6 +1,7 @@
 import { remark } from "remark";
 import remarkHtml from "remark-html";
 import { Row, Col } from "react-bootstrap";
+import { KofiWidget } from "@/components/KofiWidget";
 
 export interface GitHubRelease {
   id: number;
@@ -313,6 +314,12 @@ export default async function CliSection({ releases }: Props) {
             </Col>
           </Row>
         )}
+
+        <Row className="gx-0 mt-3">
+          <Col xs={12} className="kofi-widget">
+            <KofiWidget />
+          </Col>
+        </Row>
       </div>
     </section>
   );
